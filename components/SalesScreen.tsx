@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { AppData, Product, Sale, CartItem, LogEntry, Customer, SaleChannel, WholesalePartner, WholesaleTransaction } from '../types';
 import { translations, Language } from '../translations';
@@ -28,7 +27,8 @@ import {
   Briefcase,
   UserCircle,
   Contact,
-  Tag
+  Tag,
+  Percent
 } from 'lucide-react';
 import LocalImage from './LocalImage';
 
@@ -43,7 +43,8 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
   const t = translations[lang];
   const [searchTerm, setSearchTerm] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [discount, setDiscount] = useState(0);
+  const [discountType, setDiscountType] = useState<'percentage' | 'fixed'>('percentage');
+  const [discountValue, setDiscountValue] = useState(0);
   const [isDelivery, setIsDelivery] = useState(false);
   const [deliveryFee, setDeliveryFee] = useState(0);
   const [selectedDriverId, setSelectedDriverId] = useState<string>('');
@@ -98,9 +99,16 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
     return cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
   }, [cart]);
 
+  const calculatedDiscountAmount = useMemo(() => {
+    if (discountType === 'percentage') {
+      return (subtotal * discountValue) / 100;
+    }
+    return discountValue;
+  }, [subtotal, discountValue, discountType]);
+
   const total = useMemo(() => {
-    return Math.max(0, subtotal - discount + (isDelivery ? deliveryFee : 0));
-  }, [subtotal, discount, isDelivery, deliveryFee]);
+    return Math.max(0, subtotal - calculatedDiscountAmount + (isDelivery ? deliveryFee : 0));
+  }, [subtotal, calculatedDiscountAmount, isDelivery, deliveryFee]);
 
   useEffect(() => {
     if (posMode === 'wholesale') {
@@ -277,8 +285,12 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
       timestamp: Date.now(),
       items: [...cart],
       subtotal,
-      totalDiscount: discount,
+      totalDiscount: calculatedDiscountAmount,
+      discountType: discountType,
+      discountValue: discountValue,
       total,
+      paidAmount: total,
+      remainingAmount: 0,
       saleChannel,
       customerId: linkedCustomerId,
       isDelivery,
@@ -382,7 +394,8 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
 
   const resetPOS = () => {
     setCart([]);
-    setDiscount(0);
+    setDiscountValue(0);
+    setDiscountType('percentage');
     setIsDelivery(false);
     setSelectedDriverId('');
     setSaleChannel('store');
@@ -519,6 +532,39 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
             <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-zinc-500">
               <span>{t.subtotal}</span>
               <span>{data.currency} {subtotal.toLocaleString()}</span>
+            </div>
+
+            {/* Discount Logic Integration */}
+            <div className="space-y-3">
+              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 block">{t.add_global_discount}</label>
+              <div className="flex gap-2">
+                <div className="flex bg-black/40 light:bg-zinc-200 p-1 rounded-xl border border-zinc-800 light:border-zinc-300 w-28">
+                  <button 
+                    onClick={() => setDiscountType('percentage')}
+                    className={`flex-1 flex items-center justify-center py-2 rounded-lg text-[10px] font-black transition-all ${discountType === 'percentage' ? 'bg-red-600 text-white shadow-md' : 'text-zinc-500'}`}
+                  >
+                    <Percent size={12} />
+                  </button>
+                  <button 
+                    onClick={() => setDiscountType('fixed')}
+                    className={`flex-1 flex items-center justify-center py-2 rounded-lg text-[10px] font-black transition-all ${discountType === 'fixed' ? 'bg-red-600 text-white shadow-md' : 'text-zinc-500'}`}
+                  >
+                    <DollarSign size={12} />
+                  </button>
+                </div>
+                <div className="relative flex-1">
+                  <input 
+                    type="number" 
+                    className="w-full bg-black/40 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-xl px-4 py-2 text-sm font-black text-red-500 focus:outline-none focus:border-red-500 outline-none transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    placeholder="0"
+                    value={discountValue || ''}
+                    onChange={(e) => setDiscountValue(parseFloat(e.target.value) || 0)}
+                  />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-zinc-600 uppercase">
+                    {discountType === 'percentage' ? '%' : data.currency}
+                  </span>
+                </div>
+              </div>
             </div>
 
             {/* Entity Lookup Section */}

@@ -54,6 +54,10 @@ const App: React.FC = () => {
     wholesaleTransactions: [],
     drivers: [],
     customers: [],
+    // Fix: Add missing HR properties to initial state
+    employees: [],
+    attendance: [],
+    salaryTransactions: [],
     initialCash: 0,
     draftExpiryMinutes: 120,
     currency: 'EGP',
@@ -93,6 +97,10 @@ const App: React.FC = () => {
       wholesaleTransactions: loadedData.wholesaleTransactions || [],
       drivers: loadedData.drivers || [],
       customers: loadedData.customers || [],
+      // Fix: Ensure HR properties are present in cleaned data
+      employees: loadedData.employees || [],
+      attendance: loadedData.attendance || [],
+      salaryTransactions: loadedData.salaryTransactions || [],
       currency: loadedData.currency || 'EGP'
     };
 

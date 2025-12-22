@@ -1,4 +1,3 @@
-
 import React, { useMemo, useState } from 'react';
 import { AppData, Sale, ViewType, WholesaleTransaction } from '../types';
 import { 
@@ -25,54 +24,99 @@ interface DashboardProps {
   cashBalance: number;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale, cashBalance }) => {
+const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale }) => {
   const today = new Date().setHours(0, 0, 0, 0);
   const t = translations[lang];
   const [detailModal, setDetailModal] = useState<'today' | 'receivables' | 'payables' | null>(null);
   
   const stats = useMemo(() => {
-    const todaySales = data.sales.filter(s => new Date(s.timestamp).setHours(0, 0, 0, 0) === today);
-    const todayWholesaleSales = (data.wholesaleTransactions || [])
+    // Defensive access to arrays
+    const sales = data?.sales || [];
+    const wholesaleTrans = data?.wholesaleTransactions || [];
+    const expenses = data?.expenses || [];
+    const returns = data?.returns || [];
+    const initialCash = data?.initialCash || 0;
+    const salaryTrans = data?.salaryTransactions || [];
+
+    // Today's stats (based on Paid Amount for financial reality)
+    const todaySales = sales.filter(s => new Date(s.timestamp).setHours(0, 0, 0, 0) === today);
+    const todayWholesaleSales = wholesaleTrans
       .filter(t => t.type === 'sale' && new Date(t.timestamp).setHours(0, 0, 0, 0) === today);
     
-    const todayExpenses = data.expenses.filter(e => new Date(e.timestamp).setHours(0, 0, 0, 0) === today);
-    const todayWholesalePurchases = (data.wholesaleTransactions || [])
+    const todayExpenses = expenses.filter(e => new Date(e.timestamp).setHours(0, 0, 0, 0) === today);
+    const todayWholesalePurchases = wholesaleTrans
       .filter(t => t.type === 'purchase' && new Date(t.timestamp).setHours(0, 0, 0, 0) === today);
+
+    // Financial Truth Logic: Revenue = Paid In, Costs = Paid Out
+    const totalPaidIn = sales.reduce((acc, s) => acc + (s.paidAmount || s.total), 0) + 
+                      wholesaleTrans.filter(t => t.type === 'sale').reduce((acc, t) => acc + (t.paidAmount || 0), 0);
+    
+    const totalPaidOut = expenses.reduce((acc, e) => acc + e.amount, 0) + 
+                       returns.reduce((acc, r) => acc + r.totalRefund, 0) +
+                       wholesaleTrans.filter(t => t.type === 'purchase').reduce((acc, t) => acc + (t.paidAmount || 0), 0) +
+                       salaryTrans.reduce((acc, st) => acc + st.amount, 0);
+
+    const netCash = initialCash + totalPaidIn - totalPaidOut;
+
+    // Receivables Logic (Wholesale Debt + Retail Debt)
+    const wholesaleReceivables = wholesaleTrans
+      .filter(t => t.type === 'sale')
+      .reduce((acc, t) => acc + (t.total - (t.paidAmount || 0)), 0);
+    
+    const retailReceivables = sales.reduce((acc, s) => acc + (s.remainingAmount || 0), 0);
+    const totalReceivables = wholesaleReceivables + retailReceivables;
+
+    // Payables Logic (Supplier Debt)
+    const totalPayables = wholesaleTrans
+      .filter(t => t.type === 'purchase')
+      .reduce((acc, t) => acc + (t.total - (t.paidAmount || 0)), 0);
+
+    // Stock
+    const lowStockItems = (data?.products || []).filter(p => p.stock <= (p.minStock || 5));
 
     const todayRevTotal = todaySales.reduce((acc, s) => acc + s.total, 0) + todayWholesaleSales.reduce((acc, t) => acc + t.total, 0);
     const todayCostTotal = todayExpenses.reduce((acc, e) => acc + e.amount, 0) + todayWholesalePurchases.reduce((acc, t) => acc + t.paidAmount, 0);
-
-    const lowStockItems = data.products.filter(p => p.stock <= (p.minStock || 5));
-
-    const totalReceivables = (data.wholesaleTransactions || [])
-      .filter(t => t.type === 'sale')
-      .reduce((acc, t) => acc + (t.total - t.paidAmount), 0);
-
-    const totalPayables = (data.wholesaleTransactions || [])
-      .filter(t => t.type === 'purchase')
-      .reduce((acc, t) => acc + (t.total - t.paidAmount), 0);
 
     return {
       todayRevenue: todayRevTotal,
       todayCosts: todayCostTotal,
       todayCount: todaySales.length + todayWholesaleSales.length,
-      netCash: cashBalance,
+      netCash: netCash,
       lowStockCount: lowStockItems.length,
       receivables: totalReceivables,
       payables: totalPayables,
       margin: (todayRevTotal - todayCostTotal) / (todayRevTotal || 1) * 100
     };
-  }, [data, today, cashBalance]);
+  }, [data, today]);
 
   const debtorList = useMemo(() => {
-    const balances: Record<string, number> = {};
+    const balances: Record<string, { name: string; contact: string; balance: number; type: 'retail' | 'wholesale' }> = {};
+    
+    // Wholesale Debtors
     (data.wholesaleTransactions || []).filter(t => t.type === 'sale').forEach(t => {
-      balances[t.partnerId] = (balances[t.partnerId] || 0) + (t.total - t.paidAmount);
+      const partner = data.partners.find(p => p.id === t.partnerId);
+      if (partner) {
+        const debt = t.total - t.paidAmount;
+        if (debt > 0) {
+          if (!balances[partner.id]) balances[partner.id] = { name: partner.name, contact: partner.contact, balance: 0, type: 'wholesale' };
+          balances[partner.id].balance += debt;
+        }
+      }
     });
-    return Object.entries(balances)
-      .filter(([_, bal]) => bal > 0)
-      .map(([id, bal]) => ({ partner: data.partners.find(p => p.id === id), balance: bal }));
-  }, [data.wholesaleTransactions, data.partners]);
+
+    // Retail Debtors (Customers with balance)
+    (data.sales || []).filter(s => (s.remainingAmount || 0) > 0).forEach(s => {
+      const customer = data.customers.find(c => c.id === s.customerId);
+      const name = customer?.name || s.deliveryDetails?.customerName || t.cash_customer;
+      const contact = customer?.phone || s.deliveryDetails?.customerPhone || '---';
+      const id = customer?.id || s.id; // Fallback to sale ID if not a registered customer
+      
+      if (!balances[id]) balances[id] = { name, contact, balance: 0, type: 'retail' };
+      balances[id].balance += (s.remainingAmount || 0);
+    });
+
+    return Object.values(balances).filter(b => b.balance > 0).sort((a, b) => b.balance - a.balance);
+  }, [data, t.cash_customer]);
 
   const creditorList = useMemo(() => {
     const balances: Record<string, number> = {};
@@ -85,7 +129,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
   }, [data.wholesaleTransactions, data.partners]);
 
   const todayTransactions = useMemo(() => {
-    const retail = data.sales.filter(s => new Date(s.timestamp).setHours(0, 0, 0, 0) === today).map(s => ({ ...s, type: 'retail' }));
+    const retail = (data.sales || []).filter(s => new Date(s.timestamp).setHours(0, 0, 0, 0) === today).map(s => ({ ...s, type: 'retail' }));
     const wholesale = (data.wholesaleTransactions || [])
       .filter(t => t.type === 'sale' && new Date(t.timestamp).setHours(0, 0, 0, 0) === today).map(t => ({ ...t, type: 'wholesale' }));
     return [...retail, ...wholesale].sort((a, b) => b.timestamp - a.timestamp);
@@ -96,7 +140,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
       
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-6">
         
-        {/* كارت السيولة النقدية - تم إصلاح الخلفية للوضع الفاتح */}
+        {/* Total Liquidity Card */}
         <div className="lg:col-span-2 xl:col-span-1 bg-zinc-900 light:bg-white p-8 rounded-[40px] border border-zinc-800 light:border-zinc-200 shadow-2xl relative overflow-hidden group transition-all duration-300">
           <div className="absolute top-0 right-0 p-8 opacity-10 light:opacity-5 group-hover:scale-110 transition-transform">
              <DollarSign size={120} className="text-red-600" />
@@ -108,7 +152,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
               </div>
               <div>
                 <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500 light:text-zinc-900">{t.net_position}</h4>
-                <p className="text-xs font-bold text-zinc-400 light:text-zinc-500">{t.cash_on_hand}</p>
+                <p className="text-xs font-bold text-zinc-400 light:text-zinc-50">{t.cash_on_hand}</p>
               </div>
             </div>
             <div>
@@ -144,7 +188,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
              className={`p-6 rounded-[32px] border text-start transition-all group shadow-sm ${stats.lowStockCount > 0 ? 'bg-orange-600/10 border-orange-500/50 hover:bg-orange-600/20' : 'bg-zinc-900/50 light:bg-white border border-zinc-800 light:border-zinc-200 hover:bg-zinc-800 light:hover:bg-zinc-50'}`}
            >
               <div className="flex justify-between items-center mb-4">
-                <div className={`p-2 rounded-xl ${stats.lowStockCount > 0 ? 'bg-orange-500 text-white' : 'bg-zinc-900 light:bg-zinc-100 text-zinc-500'}`}><AlertCircle size={20} /></div>
+                <div className={`p-2 rounded-xl ${stats.lowStockCount > 0 ? 'bg-orange-500 text-white' : 'bg-zinc-900 light:bg-zinc-100 text-zinc-50'}`}><AlertCircle size={20} /></div>
                 <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 light:text-zinc-900">{t.low_stock}</span>
               </div>
               <p className="text-3xl font-black text-zinc-100 light:text-zinc-900">{stats.lowStockCount}</p>
@@ -162,7 +206,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
                 <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 light:text-zinc-900">{t.receivables}</span>
               </div>
               <p className="text-3xl font-black text-zinc-100 light:text-zinc-900">{data.currency} {stats.receivables.toLocaleString()}</p>
-              <p className="text-[10px] text-blue-500 font-bold uppercase mt-2">{lang === 'ar' ? 'إجمالي مستحقات عند الغير' : 'Total money owed to us'}</p>
+              <p className="text-[10px] text-blue-500 font-bold uppercase mt-2">{lang === 'ar' ? 'إجمالي مستحقات عند الغير (تجار وعملاء)' : 'Total Owed to Us (Traders & Retail)'}</p>
            </button>
 
            <button 
@@ -174,7 +218,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
                 <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 light:text-zinc-900">{t.payables}</span>
               </div>
               <p className="text-3xl font-black text-zinc-100 light:text-zinc-900">{data.currency} {stats.payables.toLocaleString()}</p>
-              <p className="text-[10px] text-orange-500 font-bold uppercase mt-2">{lang === 'ar' ? 'إجمالي مستحقات للموردين' : 'Total money we owe'}</p>
+              <p className="text-[10px] text-orange-500 font-bold uppercase mt-2">{lang === 'ar' ? 'إجمالي مستحقات للموردين' : 'Total Supplier Debt'}</p>
            </button>
         </div>
       </div>
@@ -199,7 +243,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
                 </tr>
               </thead>
               <tbody>
-                {data.sales.slice(0, 5).map((sale) => (
+                {(data?.sales || []).slice(0, 5).map((sale) => (
                   <tr key={sale.id} onClick={() => onSelectSale(sale)} className="border-b border-zinc-800/50 light:border-zinc-100 hover:bg-zinc-800/30 light:hover:bg-zinc-50 transition-colors cursor-pointer group">
                     <td className="px-8 py-4 text-xs font-mono text-zinc-500 light:text-zinc-600">{new Date(sale.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</td>
                     <td className="px-8 py-4 text-xs font-bold text-zinc-300 light:text-zinc-900">{sale.items.length} {t.items}</td>
@@ -212,7 +256,6 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
           </div>
         </div>
 
-        {/* كارت الذكاء الاصطناعي - تم إصلاح الخلفية للوضع الفاتح */}
         <div className="bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-[40px] p-10 text-center space-y-8 flex flex-col justify-center shadow-2xl transition-all duration-300">
           <div className="relative inline-block mx-auto">
              <div className="absolute inset-0 bg-red-600 blur-2xl opacity-20 light:opacity-10 animate-pulse"></div>
@@ -262,7 +305,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
                             </div>
                             <div className="text-end">
                               <p className="font-black text-zinc-100 light:text-zinc-900">{data.currency} {t_item.total.toLocaleString()}</p>
-                              {t_item.total - (t_item.paidAmount || t_item.total) > 0 && <p className="text-[10px] text-orange-500 font-bold">{lang === 'ar' ? 'آجل' : 'Credit'}</p>}
+                              {(t_item.total - (t_item.paidAmount || t_item.total) > 0 || (t_item.remainingAmount || 0) > 0) && <p className="text-[10px] text-orange-500 font-bold">{lang === 'ar' ? 'آجل' : 'Credit'}</p>}
                             </div>
                          </div>
                        ))}
@@ -271,18 +314,21 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
 
                  {detailModal === 'receivables' && (
                     <div className="space-y-3">
-                       {debtorList.map(({partner, balance}) => (
-                         <div key={partner?.id} className="bg-zinc-950 light:bg-zinc-50 border border-zinc-800 light:border-zinc-200 p-6 rounded-3xl flex items-center justify-between">
+                       {debtorList.map((debtor, idx) => (
+                         <div key={idx} className="bg-zinc-950 light:bg-zinc-50 border border-zinc-800 light:border-zinc-200 p-6 rounded-3xl flex items-center justify-between">
                             <div className="flex items-center gap-4">
-                               <div className="w-12 h-12 rounded-2xl bg-blue-600/10 flex items-center justify-center text-blue-500"><Users size={24}/></div>
+                               <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${debtor.type === 'wholesale' ? 'bg-blue-600/10 text-blue-500' : 'bg-purple-600/10 text-purple-500'}`}>
+                                 {debtor.type === 'wholesale' ? <Users size={24}/> : <ShoppingCart size={24}/>}
+                               </div>
                                <div>
-                                  <p className="font-black text-lg text-zinc-100 light:text-zinc-900 uppercase">{partner?.name}</p>
-                                  <p className="text-xs text-zinc-500 light:text-zinc-600">{partner?.contact}</p>
+                                  <p className="font-black text-lg text-zinc-100 light:text-zinc-900 uppercase">{debtor.name}</p>
+                                  <p className="text-xs text-zinc-500 light:text-zinc-600">{debtor.contact}</p>
+                                  <p className="text-[8px] font-black uppercase tracking-widest text-zinc-600 mt-1">{debtor.type === 'wholesale' ? t.wholesale : t.retail_sale}</p>
                                </div>
                             </div>
                             <div className="text-end">
                                <p className="text-[10px] text-zinc-500 light:text-zinc-900 font-black uppercase mb-1">{lang === 'ar' ? 'إجمالي الدين' : 'Total Debt'}</p>
-                               <p className="text-2xl font-black text-blue-500">{data.currency} {balance.toLocaleString()}</p>
+                               <p className="text-2xl font-black text-blue-500">{data.currency} {debtor.balance.toLocaleString()}</p>
                             </div>
                          </div>
                        ))}

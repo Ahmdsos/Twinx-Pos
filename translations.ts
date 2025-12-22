@@ -190,7 +190,9 @@ export const translations = {
     payment_history: "سجل المدفوعات",
     settled: "تم التسوية",
     pending: "قيد التحصيل",
-    remaining: "المتبقي"
+    remaining: "المتبقي",
+    // Fix: Added missing translation for cash customer used in Dashboard.tsx
+    cash_customer: "عميل كاش"
   },
   en: {
     dashboard: "Dashboard",
@@ -380,6 +382,8 @@ export const translations = {
     payment_history: "Payment History",
     settled: "Settled",
     pending: "Pending",
-    remaining: "Remaining"
+    remaining: "Remaining",
+    // Fix: Added missing translation for cash customer used in Dashboard.tsx
+    cash_customer: "Cash Customer"
   }
 };

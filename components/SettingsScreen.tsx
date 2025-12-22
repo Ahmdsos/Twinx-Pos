@@ -47,10 +47,24 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ data, updateData, setDa
 
   const handleReset = () => {
     if (confirm(lang === 'ar' ? 'خطر: سيتم مسح كافة البيانات نهائياً!' : 'DANGER: All data will be wiped permanently!')) {
-      // Fix: Added missing 'customers' property to AppData initialization
+      // Fix: Added missing properties (employees, attendance, salaryTransactions) to reset logic
       const resetData: AppData = { 
-        products: [], sales: [], expenses: [], returns: [], drafts: [],
-        partners: [], wholesaleTransactions: [], drivers: [], customers: [], logs: [], initialCash: 0, draftExpiryMinutes: 120, currency: 'EGP'
+        products: [], 
+        sales: [], 
+        expenses: [], 
+        returns: [], 
+        drafts: [],
+        partners: [], 
+        wholesaleTransactions: [], 
+        drivers: [], 
+        customers: [], 
+        employees: [],
+        attendance: [],
+        salaryTransactions: [],
+        logs: [], 
+        initialCash: 0, 
+        draftExpiryMinutes: 120, 
+        currency: 'EGP'
       };
       setData(resetData);
       storageService.saveData(resetData);

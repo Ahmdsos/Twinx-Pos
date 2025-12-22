@@ -38,8 +38,9 @@ const InventoryScreen: React.FC<InventoryScreenProps> = ({ data, updateData, add
   const t = translations[lang];
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Fix: Added missing 'category' to form data state
   const [formData, setFormData] = useState<Omit<Product, 'id'>>({
-    name: '', barcode: '', price: 0, costPrice: 0, stock: 0, minStock: 5, imagePath: '', isSystemGenerated: false,
+    name: '', category: 'General', barcode: '', price: 0, costPrice: 0, stock: 0, minStock: 5, imagePath: '', isSystemGenerated: false,
   });
   
   const [previewFile, setPreviewFile] = useState<File | null>(null);
@@ -77,7 +78,8 @@ const InventoryScreen: React.FC<InventoryScreenProps> = ({ data, updateData, add
   };
 
   const resetForm = () => {
-    setFormData({ name: '', barcode: '', price: 0, costPrice: 0, stock: 0, minStock: 5, imagePath: '', isSystemGenerated: false });
+    // Fix: Added missing 'category' to reset form logic
+    setFormData({ name: '', category: 'General', barcode: '', price: 0, costPrice: 0, stock: 0, minStock: 5, imagePath: '', isSystemGenerated: false });
     setPreviewFile(null);
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(null);
@@ -180,6 +182,10 @@ const InventoryScreen: React.FC<InventoryScreenProps> = ({ data, updateData, add
                   <div>
                     <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 block mb-2">{t.product_name}</label>
                     <input type="text" autoFocus className="w-full bg-black light:bg-zinc-100 border border-zinc-800 light:border-zinc-200 rounded-2xl px-6 py-4 focus:outline-none focus:border-red-500 text-zinc-100 light:text-zinc-900 font-bold" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 block mb-2">{lang === 'ar' ? 'التصنيف' : 'Category'}</label>
+                    <input type="text" className="w-full bg-black light:bg-zinc-100 border border-zinc-800 light:border-zinc-200 rounded-2xl px-6 py-4 focus:outline-none focus:border-red-500 text-zinc-100 light:text-zinc-900 font-bold" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} />
                   </div>
                   <div>
                     <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 block mb-2">{t.barcode}</label>

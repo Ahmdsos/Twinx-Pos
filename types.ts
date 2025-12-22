@@ -1,7 +1,7 @@
-
 export interface Product {
   id: string;
   name: string;
+  category: string;
   barcode?: string;
   price: number;
   costPrice: number;
@@ -13,6 +13,7 @@ export interface Product {
 
 export interface CartItem extends Product {
   quantity: number;
+  returnedQuantity?: number; // Added for return tracking integrity
   discount?: number;
   discountType?: 'percentage' | 'fixed';
 }
@@ -42,6 +43,34 @@ export interface Driver {
   isActive: boolean;
 }
 
+export type Role = 'admin' | 'cashier' | 'delivery';
+
+export interface Employee {
+  id: string;
+  name: string;
+  phone: string;
+  role: Role;
+  baseSalary: number;
+  joinDate: number;
+  isActive: boolean;
+}
+
+export interface Attendance {
+  id: string;
+  employeeId: string;
+  timestamp: number;
+  status: 'present' | 'absent' | 'late' | 'leave';
+}
+
+export interface SalaryTransaction {
+  id: string;
+  employeeId: string;
+  amount: number;
+  type: 'salary' | 'advance' | 'bonus';
+  timestamp: number;
+  notes?: string;
+}
+
 export type SaleChannel = 'store' | 'social_media' | 'website';
 
 export interface Sale {
@@ -50,13 +79,17 @@ export interface Sale {
   items: CartItem[];
   subtotal: number;
   totalDiscount: number;
+  discountType?: 'percentage' | 'fixed'; // Added for logic clarity
+  discountValue?: number; // Added for logic clarity
   total: number;
+  paidAmount: number;
+  remainingAmount: number;
   saleChannel: SaleChannel;
   customerId?: string;
   isDelivery?: boolean;
   deliveryDetails?: DeliveryDetails;
   deliveryFee?: number;
-  driverId?: string; // معرف الطيار
+  driverId?: string;
 }
 
 export interface DraftInvoice {
@@ -93,6 +126,7 @@ export interface Expense {
   description: string;
   amount: number;
   timestamp: number;
+  employeeId?: string;
 }
 
 export interface LogEntry {
@@ -100,7 +134,7 @@ export interface LogEntry {
   timestamp: number;
   action: string;
   details: string;
-  category: 'sale' | 'inventory' | 'expense' | 'return' | 'system' | 'cash' | 'wholesale' | 'delivery';
+  category: 'sale' | 'inventory' | 'expense' | 'return' | 'system' | 'cash' | 'wholesale' | 'delivery' | 'hr';
 }
 
 export interface WholesalePartner {
@@ -142,12 +176,15 @@ export interface AppData {
   logs: LogEntry[];
   partners: WholesalePartner[];
   wholesaleTransactions: WholesaleTransaction[];
-  drivers: Driver[]; // سجل الطيارين
-  customers: Customer[]; // سجل العملاء
+  drivers: Driver[];
+  customers: Customer[];
+  employees: Employee[];
+  attendance: Attendance[];
+  salaryTransactions: SalaryTransaction[];
   initialCash: number;
   draftExpiryMinutes: number;
   lastBackupTimestamp?: number;
   currency?: string;
 }
 
-export type ViewType = 'dashboard' | 'sales' | 'inventory' | 'expenses' | 'intelligence' | 'settings' | 'returns' | 'reports' | 'logs' | 'wholesale' | 'delivery' | 'customers';
+export type ViewType = 'dashboard' | 'sales' | 'inventory' | 'expenses' | 'intelligence' | 'settings' | 'returns' | 'reports' | 'logs' | 'wholesale' | 'delivery' | 'customers' | 'hr';
