@@ -32,6 +32,7 @@ import {
   Percent
 } from 'lucide-react';
 import LocalImage from './LocalImage';
+import { TwinXOps } from '../services/operations';
 
 interface SalesScreenProps {
   data: AppData;
@@ -263,92 +264,62 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
       return;
     }
 
-    let updatedCustomers = [...data.customers];
-    let linkedCustomerId: string | undefined = undefined;
-
-    // TWINX INTEGRITY PROTOCOL: Loyalty points must be strictly 1:1.
-    // 1 Unit of Currency (e.g. 1 EGP) = 1 Point.
-    const pointsEarned = Math.floor(total);
-    const totalCost = cart.reduce((acc, item) => acc + (item.costPrice * item.quantity), 0);
-    const totalProfit = total - totalCost;
-
-    if (customerDetails.phone) {
-      const existingIndex = data.customers.findIndex(c => c.phone === customerDetails.phone);
-      if (existingIndex > -1) {
-        const existing = data.customers[existingIndex];
-        linkedCustomerId = existing.id;
-        // Ensure points are persisted correctly to the profile
-        updatedCustomers[existingIndex] = {
-          ...existing,
-          totalPurchases: existing.totalPurchases + total,
-          invoiceCount: existing.invoiceCount + 1,
-          totalPoints: (existing.totalPoints || 0) + pointsEarned,
-          lastOrderTimestamp: Date.now()
-        };
-      } else {
+    try {
+      // Find or create a potential customer in the local state copy first 
+      // though TwinXOps.processRetailSale handles the customer record creation/update atomically.
+      let linkedCustomerId: string | undefined = undefined;
+      const existingCustomer = data.customers.find(c => c.phone === customerDetails.phone);
+      
+      if (existingCustomer) {
+        linkedCustomerId = existingCustomer.id;
+      } else if (customerDetails.phone) {
+        // If phone entered but not found, we pass details to Ops. 
+        // Note: Ops currently expects ID to exist or it creates one if we modify it to do so.
+        // For strict TwinX integrity, we ensure ID is determined here.
+        linkedCustomerId = crypto.randomUUID();
         const newCustomer: Customer = {
-          id: crypto.randomUUID(),
+          id: linkedCustomerId,
           name: customerDetails.name || (lang === 'ar' ? 'عميل جديد' : 'New Customer'),
           phone: customerDetails.phone,
           address: customerDetails.address,
-          totalPurchases: total,
-          invoiceCount: 1,
+          totalPurchases: 0,
+          invoiceCount: 0,
           channelsUsed: [saleChannel],
-          totalPoints: pointsEarned,
-          lastOrderTimestamp: Date.now()
+          totalPoints: 0
         };
-        updatedCustomers.push(newCustomer);
-        linkedCustomerId = newCustomer.id;
+        // Inject new customer into current state for Ops to consume
+        data.customers.push(newCustomer);
       }
+
+      const saleData: Partial<Sale> = {
+        items: cart,
+        totalDiscount: calculatedDiscountAmount,
+        discountType,
+        discountValue,
+        saleChannel,
+        customerId: linkedCustomerId,
+        isDelivery,
+        deliveryFee: isDelivery ? deliveryFee : 0,
+        deliveryDetails: isDelivery ? {
+          customerName: customerDetails.name,
+          customerPhone: customerDetails.phone,
+          deliveryAddress: customerDetails.address
+        } : undefined,
+        driverId: isDelivery ? selectedDriverId : undefined,
+        paidAmount: total, // Retail is usually full paid
+        timestamp: Date.now()
+      };
+
+      // TWINX INTEGRITY: Use Central Operations for Atomic commit
+      const newState = TwinXOps.processRetailSale(data, saleData);
+      
+      updateData(newState);
+      setSuccessSale({ id: newState.sales[0].id, type: 'retail' });
+      resetPOS();
+    } catch (err: any) {
+      setStockError(err.message);
+      setTimeout(() => setStockError(null), 3000);
     }
-
-    const newSale: Sale = {
-      id: crypto.randomUUID(),
-      timestamp: Date.now(),
-      items: cart.map(i => ({ ...i, returnedQuantity: 0 })),
-      subtotal,
-      totalDiscount: calculatedDiscountAmount,
-      discountType: discountType,
-      discountValue: discountValue,
-      total,
-      paidAmount: total,
-      remainingAmount: 0,
-      saleChannel,
-      customerId: linkedCustomerId,
-      isDelivery,
-      deliveryDetails: isDelivery ? {
-        customerName: customerDetails.name,
-        customerPhone: customerDetails.phone,
-        deliveryAddress: customerDetails.address
-      } : undefined,
-      deliveryFee: isDelivery ? deliveryFee : undefined,
-      driverId: isDelivery ? selectedDriverId : undefined,
-      totalCost,
-      totalProfit,
-      pointsEarned
-    };
-
-    const updatedProducts = data.products.map(p => {
-      const cartItem = cart.find(item => item.id === p.id);
-      if (cartItem) return { ...p, stock: p.stock - cartItem.quantity };
-      return p;
-    });
-
-    // ATOMIC COMMIT: Save all related entities in one operation to maintain financial truth
-    updateData({ 
-      sales: [newSale, ...data.sales], 
-      products: updatedProducts, 
-      customers: updatedCustomers 
-    });
-
-    addLog({ 
-      action: 'SALE_COMPLETED', 
-      category: 'sale', 
-      details: `Retail Sale: ${cart.length} items for ${data.currency} ${total}. Loyalty: +${pointsEarned} pts` 
-    });
-
-    setSuccessSale({ id: newSale.id, type: 'retail' });
-    resetPOS();
   };
 
   const handleWholesaleCheckout = () => {
@@ -358,63 +329,47 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
       return;
     }
 
-    let updatedPartners = [...data.partners];
-    let partnerToUse = data.partners.find(p => p.contact === traderDetails.contact || p.name.toLowerCase() === traderDetails.name.toLowerCase());
+    try {
+      let partnerToUse = data.partners.find(p => p.contact === traderDetails.contact || p.name.toLowerCase() === traderDetails.name.toLowerCase());
 
-    if (!partnerToUse) {
-      const newPartner: WholesalePartner = {
-        id: crypto.randomUUID(),
-        name: traderDetails.name,
-        contact: traderDetails.contact,
-        type: wholesaleType === 'purchase' ? 'supplier' : 'buyer',
-        createdAt: Date.now()
-      };
-      updatedPartners.push(newPartner);
-      partnerToUse = newPartner;
-      addLog({ action: 'PARTNER_AUTO_CREATED', category: 'wholesale', details: `New Trader Created: ${newPartner.name}` });
-    }
-
-    const newTrans: WholesaleTransaction = {
-      id: crypto.randomUUID(),
-      partnerId: partnerToUse.id,
-      type: wholesaleType,
-      timestamp: Date.now(),
-      total,
-      paidAmount: paidAmount,
-      items: cart.map(i => ({
-        productId: i.id,
-        name: i.name,
-        quantity: i.quantity,
-        unitPrice: i.price
-      })),
-      payments: paidAmount > 0 ? [{ amount: paidAmount, timestamp: Date.now(), remainingAfter: total - paidAmount }] : []
-    };
-
-    const updatedProducts = data.products.map(p => {
-      const item = cart.find(i => i.id === p.id);
-      if (item) {
-        return { 
-          ...p, 
-          stock: wholesaleType === 'purchase' ? p.stock + item.quantity : p.stock - item.quantity,
+      if (!partnerToUse) {
+        const newPartner: WholesalePartner = {
+          id: crypto.randomUUID(),
+          name: traderDetails.name,
+          contact: traderDetails.contact,
+          type: wholesaleType === 'purchase' ? 'supplier' : 'buyer',
+          createdAt: Date.now()
         };
+        data.partners.push(newPartner);
+        partnerToUse = newPartner;
       }
-      return p;
-    });
 
-    updateData({
-      wholesaleTransactions: [...(data.wholesaleTransactions || []), newTrans],
-      products: updatedProducts,
-      partners: updatedPartners
-    });
+      const newTrans: WholesaleTransaction = {
+        id: crypto.randomUUID(),
+        partnerId: partnerToUse.id,
+        type: wholesaleType,
+        timestamp: Date.now(),
+        total,
+        paidAmount: paidAmount,
+        items: cart.map(i => ({
+          productId: i.id,
+          name: i.name,
+          quantity: i.quantity,
+          unitPrice: i.price
+        })),
+        payments: paidAmount > 0 ? [{ amount: paidAmount, timestamp: Date.now(), remainingAfter: total - paidAmount }] : []
+      };
 
-    addLog({
-      action: wholesaleType === 'sale' ? 'WHOLESALE_SALE' : 'WHOLESALE_PURCHASE',
-      category: 'wholesale',
-      details: `Wholesale ${wholesaleType}: ${partnerToUse.name}, Total: ${total}, Paid: ${paidAmount}`
-    });
-
-    setSuccessSale({ id: newTrans.id, type: 'wholesale' });
-    resetPOS();
+      // TWINX INTEGRITY: Use Central Operations
+      const newState = TwinXOps.processWholesaleTransaction(data, newTrans);
+      
+      updateData(newState);
+      setSuccessSale({ id: newTrans.id, type: 'wholesale' });
+      resetPOS();
+    } catch (err: any) {
+      setStockError(err.message);
+      setTimeout(() => setStockError(null), 3000);
+    }
   };
 
   const resetPOS = () => {
