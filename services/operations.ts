@@ -1,4 +1,4 @@
-import { AppData, Sale, WholesaleTransaction, SaleReturn, Expense, LogEntry, Product, Customer, CartItem } from '../types';
+import { AppData, Sale, WholesaleTransaction, SaleReturn, Expense, LogEntry, Product, Customer, Employee, Attendance, SalaryTransaction } from '../types';
 
 /**
  * TwinX Operations Service
@@ -202,6 +202,62 @@ export const TwinXOps = {
     return {
       ...currentData,
       expenses: [expense, ...currentData.expenses],
+      logs: [log, ...currentData.logs].slice(0, 5000)
+    };
+  },
+
+  /**
+   * HR Logic: Adds an employee to the system.
+   */
+  addEmployee: (currentData: AppData, employee: Employee): AppData => {
+    const log = createLog('EMPLOYEE_ADDED', 'hr', `Registered employee: ${employee.name} (${employee.role})`);
+    return {
+      ...currentData,
+      employees: [...(currentData.employees || []), employee],
+      logs: [log, ...currentData.logs].slice(0, 5000)
+    };
+  },
+
+  /**
+   * HR Logic: Records attendance for an employee.
+   */
+  recordAttendance: (currentData: AppData, attendance: Attendance): AppData => {
+    const employee = currentData.employees.find(e => e.id === attendance.employeeId);
+    const log = createLog('ATTENDANCE_LOGGED', 'hr', `Attendance for ${employee?.name || 'Unknown'}: ${attendance.status}`);
+    return {
+      ...currentData,
+      attendance: [...(currentData.attendance || []), attendance],
+      logs: [log, ...currentData.logs].slice(0, 5000)
+    };
+  },
+
+  /**
+   * HR Logic: Processes a salary/bonus/advance payment.
+   * Linked to expenses to maintain "Financial Truth" in Net Cash.
+   */
+  processSalaryTransaction: (currentData: AppData, transaction: SalaryTransaction): AppData => {
+    const employee = currentData.employees.find(e => e.id === transaction.employeeId);
+    if (!employee) throw new Error("Employee not found for transaction.");
+
+    // Create a corresponding expense to impact net cash
+    const salaryExpense: Expense = {
+      id: crypto.randomUUID(),
+      description: `Payroll: ${employee.name} (${transaction.type})`,
+      amount: transaction.amount,
+      timestamp: transaction.timestamp,
+      employeeId: employee.id
+    };
+
+    const log = createLog(
+      'PAYROLL_PROCESSED',
+      'hr',
+      `${transaction.type.toUpperCase()} paid to ${employee.name}: ${transaction.amount}`
+    );
+
+    return {
+      ...currentData,
+      salaryTransactions: [...(currentData.salaryTransactions || []), transaction],
+      expenses: [...(currentData.expenses || []), salaryExpense],
       logs: [log, ...currentData.logs].slice(0, 5000)
     };
   }

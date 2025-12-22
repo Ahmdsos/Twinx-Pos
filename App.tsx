@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   LayoutDashboard, 
@@ -15,7 +14,8 @@ import {
   Sun,
   Moon,
   Truck,
-  Contact
+  Contact,
+  UserCircle
 } from 'lucide-react';
 import { AppData, ViewType, DraftInvoice, LogEntry, Sale } from './types';
 import { storageService } from './services/storage';
@@ -32,6 +32,7 @@ import AuditLogScreen from './components/AuditLogScreen';
 import WholesaleScreen from './components/WholesaleScreen';
 import DeliveryScreen from './components/DeliveryScreen';
 import CustomersScreen from './components/CustomersScreen';
+import EmployeesScreen from './components/EmployeesScreen';
 import SaleDetailsModal from './components/SaleDetailsModal';
 
 const App: React.FC = () => {
@@ -54,7 +55,6 @@ const App: React.FC = () => {
     wholesaleTransactions: [],
     drivers: [],
     customers: [],
-    // Fix: Add missing HR properties to initial state
     employees: [],
     attendance: [],
     salaryTransactions: [],
@@ -97,7 +97,6 @@ const App: React.FC = () => {
       wholesaleTransactions: loadedData.wholesaleTransactions || [],
       drivers: loadedData.drivers || [],
       customers: loadedData.customers || [],
-      // Fix: Ensure HR properties are present in cleaned data
       employees: loadedData.employees || [],
       attendance: loadedData.attendance || [],
       salaryTransactions: loadedData.salaryTransactions || [],
@@ -172,6 +171,8 @@ const App: React.FC = () => {
         return <DeliveryScreen data={data} updateData={updateData} addLog={addLog} lang={lang} onSelectSale={setSelectedSale} />;
       case 'customers':
         return <CustomersScreen data={data} updateData={updateData} addLog={addLog} lang={lang} onSelectSale={setSelectedSale} />;
+      case 'hr':
+        return <EmployeesScreen data={data} updateData={updateData} addLog={addLog} lang={lang} />;
       case 'settings':
         return <SettingsScreen data={data} updateData={updateData} setData={setData} addLog={addLog} lang={lang} />;
       default:
@@ -184,6 +185,7 @@ const App: React.FC = () => {
     { id: 'sales', label: t.sales, icon: <ShoppingCart size={20} /> },
     { id: 'wholesale', label: t.wholesale, icon: <Users size={20} /> },
     { id: 'customers', label: t.customers, icon: <Contact size={20} /> },
+    { id: 'hr', label: t.hr, icon: <UserCircle size={20} /> },
     { id: 'delivery', label: t.delivery, icon: <Truck size={20} /> },
     { id: 'inventory', label: t.inventory, icon: <Package size={20} /> },
     { id: 'reports', label: t.reports, icon: <BarChart3 size={20} /> },

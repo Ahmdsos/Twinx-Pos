@@ -1,4 +1,3 @@
-
 export type Language = 'ar' | 'en';
 
 export const translations = {
@@ -15,6 +14,7 @@ export const translations = {
     settings: "الإعدادات",
     delivery: "الدليفري",
     customers: "قاعدة العملاء",
+    hr: "الموظفين",
     net_cash: "السيولة المتوفرة (كاش)",
     local_only: "نظام أوفلاين محلي",
     today_revenue: "مبيعات اليوم",
@@ -191,8 +191,24 @@ export const translations = {
     settled: "تم التسوية",
     pending: "قيد التحصيل",
     remaining: "المتبقي",
-    // Fix: Added missing translation for cash customer used in Dashboard.tsx
-    cash_customer: "عميل كاش"
+    cash_customer: "عميل كاش",
+    add_employee: "إضافة موظف",
+    payroll: "الرواتب",
+    attendance: "الحضور والانصراف",
+    staff_list: "قائمة الموظفين",
+    role: "الدور الوظيفي",
+    base_salary: "الراتب الأساسي",
+    check_in: "تسجيل حضور",
+    check_out: "تسجيل انصراف",
+    pay_salary: "صرف راتب",
+    pay_advance: "صرف سلفة",
+    pay_bonus: "صرف مكافأة",
+    employee_name: "اسم الموظف",
+    present: "حاضر",
+    absent: "غائب",
+    late: "متأخر",
+    leave: "إجازة",
+    salary_history: "سجل الرواتب"
   },
   en: {
     dashboard: "Dashboard",
@@ -207,6 +223,7 @@ export const translations = {
     settings: "Settings",
     delivery: "Delivery",
     customers: "Customers",
+    hr: "Employees",
     net_cash: "Available Cash",
     local_only: "Local Offline System",
     today_revenue: "Today's Sales",
@@ -366,7 +383,7 @@ export const translations = {
     total_purchases: "Total Purchases",
     invoice_count: "Invoice Count",
     add_customer: "Add Customer",
-    edit_customer: "Edit Product",
+    edit_customer: "Edit Customer",
     no_customers: "No customers found",
     customer_since: "Customer Since",
     avg_order_value: "Avg Order Value",
@@ -383,7 +400,23 @@ export const translations = {
     settled: "Settled",
     pending: "Pending",
     remaining: "Remaining",
-    // Fix: Added missing translation for cash customer used in Dashboard.tsx
-    cash_customer: "Cash Customer"
+    cash_customer: "Cash Customer",
+    add_employee: "Add Employee",
+    payroll: "Payroll",
+    attendance: "Attendance",
+    staff_list: "Staff List",
+    role: "Role",
+    base_salary: "Base Salary",
+    check_in: "Check In",
+    check_out: "Check Out",
+    pay_salary: "Pay Salary",
+    pay_advance: "Pay Advance",
+    pay_bonus: "Pay Bonus",
+    employee_name: "Employee Name",
+    present: "Present",
+    absent: "Absent",
+    late: "Late",
+    leave: "Leave",
+    salary_history: "Salary History"
   }
 };
