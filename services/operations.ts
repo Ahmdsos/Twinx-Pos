@@ -3,6 +3,7 @@ import { AppData, Sale, WholesaleTransaction, SaleReturn, Expense, LogEntry, Pro
 /**
  * TwinX Operations Service
  * Pure state transformers ensuring "Atomic Transactions" and financial integrity.
+ * This service is the single source of truth for state mutations.
  */
 
 const createLog = (action: string, category: LogEntry['category'], details: string): LogEntry => ({
@@ -34,10 +35,10 @@ export const TwinXOps = {
 
   /**
    * Processes a retail sale atomically.
-   * FIX: Ensured Customer Points (1:1 ratio) are persisted via index mapping and updated correctly.
+   * PROTOCOL: Snapshot -> Mutate (Stock, Customer, Sale, Logs) -> Return New State.
+   * FIX: Enforced 1:1 Loyalty Point ratio.
    */
   processRetailSale: (currentData: AppData, saleData: Partial<Sale>): AppData => {
-    // Create a working clone of current state
     const newData: AppData = JSON.parse(JSON.stringify(currentData));
     
     const items = saleData.items || [];
@@ -45,19 +46,18 @@ export const TwinXOps = {
     const discount = saleData.totalDiscount || 0;
     const deliveryIncome = saleData.deliveryFee || 0;
 
-    // Financial Pro: Product Cost Calculation & Stock Validation
+    // 1. Validate and Deduct Stock
     let totalCost = 0;
     for (const item of items) {
       const pIndex = newData.products.findIndex(prod => prod.id === item.id);
-      if (pIndex === -1) throw new Error(`Product not found: ${item.name}`);
+      if (pIndex === -1) throw new Error(`Product missing from ledger: ${item.name}`);
       const p = newData.products[pIndex];
       
       if (p.stock < item.quantity) {
-        throw new Error(`Insufficient stock: ${item.name}. Available: ${p.stock}`);
+        throw new Error(`Insufficient stock for ${item.name}. Available: ${p.stock}`);
       }
       
       totalCost += (p.costPrice * item.quantity);
-      // Deduct stock
       newData.products[pIndex].stock -= item.quantity;
     }
 
@@ -67,7 +67,7 @@ export const TwinXOps = {
     const remaining = Math.max(0, total - paid);
     const totalProfit = (productRevenue - totalCost) + deliveryIncome;
     
-    // Loyalty Point Logic: 1 Point per 1 Currency Unit (1:1)
+    // TWINX INTEGRITY: Loyalty Point Logic (Enforced 1:1)
     const pointsEarned = Math.floor(total);
 
     const finalSale: Sale = {
@@ -91,32 +91,35 @@ export const TwinXOps = {
       status: saleData.status || (saleData.isDelivery ? 'pending' : 'completed')
     };
 
-    // Loyalty Persistence FIX: Explicit index-based mapping
+    // 2. Update Customer Stats and Loyalty
     if (finalSale.customerId) {
-      const customerIndex = newData.customers.findIndex(c => c.id === finalSale.customerId);
-      if (customerIndex >= 0) {
-        newData.customers[customerIndex] = {
-          ...newData.customers[customerIndex],
-          totalPurchases: newData.customers[customerIndex].totalPurchases + total,
-          invoiceCount: newData.customers[customerIndex].invoiceCount + 1,
+      const cIndex = newData.customers.findIndex(c => c.id === finalSale.customerId);
+      if (cIndex >= 0) {
+        const c = newData.customers[cIndex];
+        newData.customers[cIndex] = {
+          ...c,
+          totalPurchases: c.totalPurchases + total,
+          invoiceCount: c.invoiceCount + 1,
+          totalPoints: (c.totalPoints || 0) + pointsEarned,
           lastOrderTimestamp: finalSale.timestamp,
-          totalPoints: (newData.customers[customerIndex].totalPoints || 0) + pointsEarned,
           lastVisit: Date.now()
         };
       }
     }
 
-    const log = createLog('SALE_COMPLETED', 'sale', `INV #${finalSale.id.split('-')[0]} for ${total}. Points earned: ${pointsEarned}.`);
-
+    // 3. Commit Sale and Log
     newData.sales = [finalSale, ...newData.sales];
-    newData.logs = [log, ...newData.logs].slice(0, 5000);
+    newData.logs = [
+      createLog('SALE_COMPLETED', 'sale', `INV #${finalSale.id.split('-')[0]} for ${total}. Points: +${pointsEarned}`),
+      ...newData.logs
+    ].slice(0, 5000);
 
     return newData;
   },
 
   /**
-   * Update order/delivery status.
-   * FIX: Handles 'cancelled' status by restocking items to inventory (Atomic Restock).
+   * Update order/delivery status with full reversal logic.
+   * ATOMIC RULE: If cancelled, RESTOCK items and DEDUCT financials from Customer.
    */
   updateDeliveryStatus: (currentData: AppData, saleId: string, status: 'delivered' | 'cancelled' | 'pending'): AppData => {
     const newData: AppData = JSON.parse(JSON.stringify(currentData));
@@ -124,19 +127,21 @@ export const TwinXOps = {
     if (saleIndex === -1) throw new Error("Sale record not found.");
     
     const originalSale = newData.sales[saleIndex];
-    if (originalSale.status === status) return currentData;
+    const oldStatus = originalSale.status;
+    if (oldStatus === status) return currentData;
 
-    // Logic for 'cancelled': Restock Items & Reverse Customer Stats
-    if (status === 'cancelled' && originalSale.status !== 'cancelled') {
-      // 1. Restore Stock
-      originalSale.items.forEach(soldItem => {
-        const pIndex = newData.products.findIndex(p => p.id === soldItem.id);
+    // REVERSAL LOGIC: Transitioning TO Cancelled
+    if (status === 'cancelled' && oldStatus !== 'cancelled') {
+      // 1. Restock items (respecting already returned items)
+      originalSale.items.forEach(item => {
+        const pIndex = newData.products.findIndex(p => p.id === item.id);
         if (pIndex >= 0) {
-          newData.products[pIndex].stock += (soldItem.quantity - (soldItem.returnedQuantity || 0));
+          const restockQty = item.quantity - (item.returnedQuantity || 0);
+          newData.products[pIndex].stock += restockQty;
         }
       });
 
-      // 2. Reverse Customer Accumulations
+      // 2. Reverse Financials from Customer Profile
       if (originalSale.customerId) {
         const cIndex = newData.customers.findIndex(c => c.id === originalSale.customerId);
         if (cIndex >= 0) {
@@ -150,17 +155,21 @@ export const TwinXOps = {
         }
       }
     } 
-    // Logic for 'pending/delivered' from 'cancelled': Re-deduct Stock (Validation Required)
-    else if (status !== 'cancelled' && originalSale.status === 'cancelled') {
-      originalSale.items.forEach(soldItem => {
-        const pIndex = newData.products.findIndex(p => p.id === soldItem.id);
+    // RESTORATION LOGIC: Transitioning FROM Cancelled back to Active
+    else if (status !== 'cancelled' && oldStatus === 'cancelled') {
+      // 1. Deduct Stock again (Validation required)
+      originalSale.items.forEach(item => {
+        const pIndex = newData.products.findIndex(p => p.id === item.id);
         if (pIndex >= 0) {
-          const p = newData.products[pIndex];
-          if (p.stock < soldItem.quantity) throw new Error(`Insufficient stock to restore order: ${p.name}`);
-          newData.products[pIndex].stock -= soldItem.quantity;
+          const reqQty = item.quantity - (item.returnedQuantity || 0);
+          if (newData.products[pIndex].stock < reqQty) {
+            throw new Error(`Cannot restore order: ${item.name} is out of stock.`);
+          }
+          newData.products[pIndex].stock -= reqQty;
         }
       });
 
+      // 2. Restore Financials to Customer Profile
       if (originalSale.customerId) {
         const cIndex = newData.customers.findIndex(c => c.id === originalSale.customerId);
         if (cIndex >= 0) {
@@ -175,53 +184,18 @@ export const TwinXOps = {
       }
     }
 
-    // Update the status
     newData.sales[saleIndex].status = status;
-
-    const log = createLog('STATUS_UPDATE', 'delivery', `Order #${saleId.split('-')[0]} marked as ${status.toUpperCase()}.`);
-    newData.logs = [log, ...newData.logs].slice(0, 5000);
+    newData.logs = [
+      createLog('STATUS_UPDATE', 'delivery', `Order #${saleId.split('-')[0]} set to ${status.toUpperCase()}`),
+      ...newData.logs
+    ].slice(0, 5000);
 
     return newData;
   },
 
   /**
-   * Re-orders a previous sale.
-   * FIX: Generates new sale ID and triggers processRetailSale for full validation.
-   */
-  duplicateSale: (data: AppData, originalSaleId: string): AppData => {
-    const original = data.sales.find(s => s.id === originalSaleId);
-    if (!original) throw new Error("Original sale record not found.");
-
-    // Create copy data for a fresh transaction
-    const newSaleData: Partial<Sale> = {
-      id: crypto.randomUUID(),
-      timestamp: Date.now(),
-      items: original.items.map(i => {
-          const { returnedQuantity, ...rest } = i; // Strip return metadata
-          return { ...rest, returnedQuantity: 0 };
-      }),
-      subtotal: original.subtotal,
-      totalDiscount: original.totalDiscount,
-      discountType: original.discountType,
-      discountValue: original.discountValue,
-      total: original.total,
-      paidAmount: 0, // Assume not paid initially for duplication
-      remainingAmount: original.total,
-      saleChannel: original.saleChannel,
-      customerId: original.customerId,
-      isDelivery: original.isDelivery,
-      deliveryDetails: original.deliveryDetails,
-      deliveryFee: original.deliveryFee,
-      status: original.isDelivery ? 'pending' : 'completed'
-    };
-
-    // Use processRetailSale to handle atomic stock deduction and point persistence
-    return TwinXOps.processRetailSale(data, newSaleData);
-  },
-
-  /**
-   * Process a Return.
-   * Adjusts stock and profit based on returned items.
+   * Processes a Return.
+   * Adjusts stock and profit based on returned items using the Golden Ratio for discounts.
    */
   processReturn: (currentData: AppData, returnRecord: SaleReturn): AppData => {
     const newData: AppData = JSON.parse(JSON.stringify(currentData));
@@ -229,7 +203,7 @@ export const TwinXOps = {
     if (saleIndex === -1) throw new Error("Original sale record not found.");
     
     const originalSale = newData.sales[saleIndex];
-    const productDiscountRatio = originalSale.subtotal > 0 
+    const discountRatio = originalSale.subtotal > 0 
       ? (originalSale.subtotal - originalSale.totalDiscount) / originalSale.subtotal 
       : 1;
     
@@ -244,16 +218,16 @@ export const TwinXOps = {
       const currentReturned = item.returnedQuantity || 0;
       
       if (currentReturned + returnItem.quantity > item.quantity) {
-        throw new Error(`Cannot return more than sold. ${item.name}: ${currentReturned + returnItem.quantity} > ${item.quantity}`);
+        throw new Error(`Invalid return quantity for ${item.name}.`);
       }
 
-      // 1. Update item return metadata
+      // 1. Update Sale Metadata
       originalSale.items[itemIndex].returnedQuantity = currentReturned + returnItem.quantity;
       
-      // 2. Calculate refund values
-      totalCalculatedRefund += (item.price * returnItem.quantity) * productDiscountRatio;
+      // 2. Calculate Refund (Applying weighted discount)
+      totalCalculatedRefund += (item.price * returnItem.quantity) * discountRatio;
       
-      // 3. Return to stock
+      // 3. Return to Stock
       const pIndex = newData.products.findIndex(p => p.id === returnItem.productId);
       if (pIndex >= 0) {
         newData.products[pIndex].stock += returnItem.quantity;
@@ -261,27 +235,55 @@ export const TwinXOps = {
       }
     }
 
-    // Financial adjustment
-    const profitReduction = totalCalculatedRefund - totalReturnedCost;
+    // 4. Financial Adjustments (Atomic)
     originalSale.remainingAmount = Math.max(0, originalSale.remainingAmount - totalCalculatedRefund);
-    originalSale.totalCost -= totalReturnedCost;
-    originalSale.totalProfit -= profitReduction;
+    originalSale.totalCost = Math.max(0, originalSale.totalCost - totalReturnedCost);
+    originalSale.totalProfit = Math.max(0, originalSale.totalProfit - (totalCalculatedRefund - totalReturnedCost));
 
-    // Loyalty reversal (Points deducted per refund value)
-    const pointsToDeduct = Math.floor(totalCalculatedRefund);
+    // 5. Loyalty Reversal
     if (originalSale.customerId) {
       const cIndex = newData.customers.findIndex(c => c.id === originalSale.customerId);
       if (cIndex >= 0) {
-        newData.customers[cIndex].totalPoints = Math.max(0, (newData.customers[cIndex].totalPoints || 0) - pointsToDeduct);
+        newData.customers[cIndex].totalPoints = Math.max(0, (newData.customers[cIndex].totalPoints || 0) - Math.floor(totalCalculatedRefund));
       }
     }
 
-    const log = createLog('RETURN_PROCESSED', 'return', `Processed refund of ${totalCalculatedRefund.toFixed(2)} for INV #${originalSale.id.split('-')[0]}.`);
-    
     newData.returns = [{ ...returnRecord, totalRefund: totalCalculatedRefund }, ...newData.returns];
-    newData.logs = [log, ...newData.logs].slice(0, 5000);
+    newData.logs = [
+      createLog('RETURN_PROCESSED', 'return', `Refund of ${totalCalculatedRefund.toFixed(2)} for INV #${originalSale.id.split('-')[0]}`),
+      ...newData.logs
+    ].slice(0, 5000);
 
     return newData;
+  },
+
+  /**
+   * Duplicates a sale for quick re-ordering.
+   */
+  duplicateSale: (data: AppData, originalSaleId: string): AppData => {
+    const original = data.sales.find(s => s.id === originalSaleId);
+    if (!original) throw new Error("Source invoice not found.");
+
+    const newSaleData: Partial<Sale> = {
+      id: crypto.randomUUID(),
+      timestamp: Date.now(),
+      items: original.items.map(i => ({ ...i, returnedQuantity: 0 })),
+      subtotal: original.subtotal,
+      totalDiscount: original.totalDiscount,
+      discountType: original.discountType,
+      discountValue: original.discountValue,
+      total: original.total,
+      paidAmount: 0,
+      remainingAmount: original.total,
+      saleChannel: original.saleChannel,
+      customerId: original.customerId,
+      isDelivery: original.isDelivery,
+      deliveryDetails: original.deliveryDetails,
+      deliveryFee: original.deliveryFee,
+      status: original.isDelivery ? 'pending' : 'completed'
+    };
+
+    return TwinXOps.processRetailSale(data, newSaleData);
   },
 
   processWholesaleTransaction: (currentData: AppData, transaction: WholesaleTransaction): AppData => {
@@ -290,35 +292,42 @@ export const TwinXOps = {
     
     for (const item of transaction.items) {
       const pIndex = newData.products.findIndex(prod => prod.id === item.productId);
-      if (pIndex === -1) throw new Error(`Product not found: ${item.name}`);
+      if (pIndex === -1) throw new Error(`Product missing: ${item.name}`);
       const p = newData.products[pIndex];
       
       if (!isPurchase && p.stock < item.quantity) {
-        throw new Error(`Insufficient stock for wholesale: ${item.name}`);
+        throw new Error(`Insufficient stock: ${item.name}`);
       }
       
       newData.products[pIndex].stock += isPurchase ? item.quantity : -item.quantity;
     }
 
-    const log = createLog(isPurchase ? 'WHOLESALE_PURCHASE' : 'WHOLESALE_SALE', 'wholesale', `Bulk ${transaction.type} to/from partner.`);
     newData.wholesaleTransactions = [transaction, ...newData.wholesaleTransactions];
-    newData.logs = [log, ...newData.logs].slice(0, 5000);
+    newData.logs = [
+      createLog(isPurchase ? 'WHOLESALE_PURCHASE' : 'WHOLESALE_SALE', 'wholesale', `Bulk ${transaction.type} finalized.`),
+      ...newData.logs
+    ].slice(0, 5000);
 
     return newData;
   },
 
   processExpense: (currentData: AppData, expense: Expense): AppData => {
     const newData: AppData = JSON.parse(JSON.stringify(currentData));
-    const log = createLog('EXPENSE_LOGGED', 'expense', `Recorded: ${expense.description} (${expense.amount})`);
     newData.expenses = [expense, ...newData.expenses];
-    newData.logs = [log, ...newData.logs].slice(0, 5000);
+    newData.logs = [
+      createLog('EXPENSE_LOGGED', 'expense', `${expense.description}: ${expense.amount}`),
+      ...newData.logs
+    ].slice(0, 5000);
     return newData;
   },
 
   addEmployee: (currentData: AppData, employee: Employee): AppData => {
     const newData: AppData = JSON.parse(JSON.stringify(currentData));
     newData.employees = [...(newData.employees || []), employee];
-    newData.logs = [createLog('STAFF_ADDED', 'hr', `Registered ${employee.role}: ${employee.name}`), ...newData.logs];
+    newData.logs = [
+      createLog('STAFF_ADDED', 'hr', `Registered ${employee.role}: ${employee.name}`),
+      ...newData.logs
+    ].slice(0, 5000);
     return newData;
   },
 
@@ -331,7 +340,7 @@ export const TwinXOps = {
 
     switch (action) {
       case 'check_in':
-        if (todayRecord) throw new Error("Already checked in.");
+        if (todayRecord) throw new Error("Already checked in today.");
         newData.attendance.push({ id: crypto.randomUUID(), employeeId, date: today, timestamp: now, checkIn: now, breaks: [], status: 'present' });
         break;
       case 'check_out':
@@ -340,7 +349,7 @@ export const TwinXOps = {
         todayRecord.status = 'completed';
         break;
       case 'break_start':
-        if (!todayRecord || todayRecord.status !== 'present') throw new Error("Cannot start break now.");
+        if (!todayRecord || todayRecord.status !== 'present') throw new Error("Cannot start break.");
         todayRecord.status = 'on_break';
         todayRecord.breaks.push({ start: now });
         break;
@@ -351,7 +360,10 @@ export const TwinXOps = {
         break;
     }
 
-    newData.logs = [createLog('ATTENDANCE', 'hr', `Staff ${employeeId} performed ${action}`), ...newData.logs];
+    newData.logs = [
+      createLog('ATTENDANCE', 'hr', `Staff ${employeeId} performed ${action}`),
+      ...newData.logs
+    ].slice(0, 5000);
     return newData;
   },
 
@@ -370,7 +382,10 @@ export const TwinXOps = {
 
     newData.salaryTransactions = [...(newData.salaryTransactions || []), transaction];
     newData.expenses = [...(newData.expenses || []), salaryExpense];
-    newData.logs = [createLog('PAYROLL', 'hr', `Paid ${transaction.type} to ${employee.name}`), ...newData.logs];
+    newData.logs = [
+      createLog('PAYROLL', 'hr', `Paid ${transaction.type} to ${employee.name}`),
+      ...newData.logs
+    ].slice(0, 5000);
     
     return newData;
   },
@@ -393,7 +408,7 @@ export const TwinXOps = {
   adjustStock: (currentData: AppData, productId: string, newQuantity: number, reason: string, employeeId: string): AppData => {
     const newData: AppData = JSON.parse(JSON.stringify(currentData));
     const index = newData.products.findIndex(p => p.id === productId);
-    if (index === -1) throw new Error("Product not found");
+    if (index === -1) throw new Error("Product missing from ledger");
 
     const product = newData.products[index];
     const oldStock = product.stock;
@@ -403,11 +418,19 @@ export const TwinXOps = {
     const stockLog: StockLog = { id: crypto.randomUUID(), productId, oldStock, newStock: newQuantity, reason, timestamp: Date.now(), employeeId };
     
     if (diff > 0) {
-      newData.expenses.push({ id: crypto.randomUUID(), description: `Inv Loss: ${product.name} (${reason})`, amount: diff * product.costPrice, timestamp: Date.now() });
+      newData.expenses.push({ 
+        id: crypto.randomUUID(), 
+        description: `Shrinkage: ${product.name} (${reason})`, 
+        amount: diff * product.costPrice, 
+        timestamp: Date.now() 
+      });
     }
 
     newData.stockLogs = [stockLog, ...newData.stockLogs];
-    newData.logs = [createLog('STOCK_ADJUSTED', 'inventory', `${product.name} ${oldStock} -> ${newQuantity}`), ...newData.logs];
+    newData.logs = [
+      createLog('STOCK_ADJUSTED', 'inventory', `${product.name}: ${oldStock} -> ${newQuantity}`),
+      ...newData.logs
+    ].slice(0, 5000);
     
     return newData;
   }
