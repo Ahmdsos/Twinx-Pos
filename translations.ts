@@ -1,3 +1,4 @@
+
 export type Language = 'ar' | 'en';
 
 export const translations = {
@@ -198,8 +199,8 @@ export const translations = {
     staff_list: "قائمة الموظفين",
     role: "الدور الوظيفي",
     base_salary: "الراتب الأساسي",
-    check_in: "تسجيل حضور",
-    check_out: "تسجيل انصراف",
+    hr_check_in: "تسجيل حضور",
+    hr_check_out: "تسجيل انصراف",
     pay_salary: "صرف راتب",
     pay_advance: "صرف سلفة",
     pay_bonus: "صرف مكافأة",
@@ -407,8 +408,8 @@ export const translations = {
     staff_list: "Staff List",
     role: "Role",
     base_salary: "Base Salary",
-    check_in: "Check In",
-    check_out: "Check Out",
+    hr_check_in: "Check In",
+    hr_check_out: "Check Out",
     pay_salary: "Pay Salary",
     pay_advance: "Pay Advance",
     pay_bonus: "Pay Bonus",

@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { AppData, Employee, Attendance, SalaryTransaction, LogEntry, Sale } from '../types';
 import { translations, Language } from '../translations';
@@ -183,7 +184,7 @@ const EmployeesScreen: React.FC<EmployeesScreenProps> = ({ data, updateData, add
                         {session.status === 'present' && (
                           <div className="flex gap-2">
                             <button onClick={() => handleAttendanceAction(emp.id, 'break_start')} className="flex-1 py-3 bg-orange-600/10 border border-orange-500/30 text-orange-500 rounded-2xl font-black text-[10px] uppercase flex items-center justify-center gap-2 hover:bg-orange-600 hover:text-white transition-all"><Coffee size={14}/> {lang === 'ar' ? 'بدأ استراحة' : 'Start Break'}</button>
-                            <button onClick={() => handleAttendanceAction(emp.id, 'check_out')} className="flex-1 py-3 bg-red-600/10 border border-red-500/30 text-red-500 rounded-2xl font-black text-[10px] uppercase flex items-center justify-center gap-2 hover:bg-red-600 hover:text-white transition-all"><LogOut size={14}/> {t.check_out}</button>
+                            <button onClick={() => handleAttendanceAction(emp.id, 'check_out')} className="flex-1 py-3 bg-red-600/10 border border-red-500/30 text-red-500 rounded-2xl font-black text-[10px] uppercase flex items-center justify-center gap-2 hover:bg-red-600 hover:text-white transition-all"><LogOut size={14}/> {t.hr_check_out}</button>
                           </div>
                         )}
                         {session.status === 'on_break' && (
@@ -197,7 +198,7 @@ const EmployeesScreen: React.FC<EmployeesScreenProps> = ({ data, updateData, add
                      </div>
                    ) : (
                      <button onClick={() => handleAttendanceAction(emp.id, 'check_in')} className="w-full py-4 bg-green-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 shadow-xl shadow-green-900/20 hover:scale-[1.02] transition-transform">
-                        <CheckCircle2 size={18}/> {t.check_in}
+                        <CheckCircle2 size={18}/> {t.hr_check_in}
                      </button>
                    )}
                 </div>

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { AppData, Product, Sale, CartItem, LogEntry, Customer, SaleChannel, WholesalePartner, WholesaleTransaction } from '../types';
+import { AppData, Product, Sale, CartItem, LogEntry, Customer, SaleChannel, WholesalePartner, WholesaleTransaction, Employee } from '../types';
 import { translations, Language } from '../translations';
 import { 
   Search, 
@@ -77,6 +77,11 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
 
   const [successSale, setSuccessSale] = useState<{id: string, type: 'retail' | 'wholesale' } | null>(null);
   const [stockError, setStockError] = useState<string | null>(null);
+
+  // Derived: Unified Delivery Staff from HR Module
+  const deliveryStaff = useMemo(() => {
+    return (data.employees || []).filter(e => e.role === 'delivery' && e.isActive);
+  }, [data.employees]);
 
   // Filter based on typed input
   const matchingLookup = useMemo(() => {
@@ -772,7 +777,7 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
                       onChange={e => setSelectedDriverId(e.target.value)}
                     >
                       <option value="">{t.assign_driver}</option>
-                      {data.drivers.filter(d => d.isActive).map(d => (
+                      {deliveryStaff.map(d => (
                         <option key={d.id} value={d.id}>{d.name}</option>
                       ))}
                     </select>
