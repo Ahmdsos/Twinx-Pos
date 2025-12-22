@@ -50,7 +50,7 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
   const driverOrders = useMemo(() => {
     if (!selectedDriverId) return [];
     return data.sales
-      .filter(s => s.driverId === selectedDriverId)
+      .filter(s => s.driverId === selectedDriverId && s.isDelivery)
       .sort((a, b) => b.timestamp - a.timestamp);
   }, [data.sales, selectedDriverId]);
 
@@ -70,6 +70,7 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
     try {
       const updatedData = TwinXOps.updateDeliveryStatus(data, saleId, status);
       updateData(updatedData);
+      // Status log is created inside TwinXOps
     } catch (err: any) {
       alert(err.message);
     }
@@ -95,6 +96,14 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
         return <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-red-500/10 text-red-500 border border-red-500/20">{lang === 'ar' ? 'ملغي' : 'Cancelled'}</span>;
       default:
         return <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-orange-500/10 text-orange-500 border border-orange-500/20 animate-pulse">{lang === 'ar' ? 'قيد التوصيل' : 'Pending'}</span>;
+    }
+  };
+
+  const getCardBorderStyle = (status?: string) => {
+    switch (status) {
+      case 'delivered': return 'border-green-600/30 shadow-green-900/5';
+      case 'cancelled': return 'border-red-600/30 shadow-red-900/5';
+      default: return 'border-orange-600/30 shadow-orange-900/5';
     }
   };
 
@@ -215,7 +224,7 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
                  
                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                    {driverOrders.map(sale => (
-                     <div key={sale.id} className={`bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 p-6 rounded-[32px] flex flex-col gap-6 hover:border-red-600/40 transition-all shadow-lg group relative overflow-hidden ${sale.status === 'cancelled' ? 'opacity-60 grayscale' : ''}`}>
+                     <div key={sale.id} className={`bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 p-6 rounded-[32px] flex flex-col gap-6 hover:scale-[1.01] transition-all shadow-lg group relative overflow-hidden ${getCardBorderStyle(sale.status)} ${sale.status === 'cancelled' ? 'opacity-60 grayscale' : ''}`}>
                         
                         {/* Status Overlay for Cancelled */}
                         {sale.status === 'cancelled' && (
@@ -224,7 +233,7 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
 
                         <div className="flex justify-between items-start">
                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-2xl bg-zinc-800 light:bg-zinc-100 flex items-center justify-center text-zinc-500 group-hover:text-red-500 transition-colors"><Receipt size={20}/></div>
+                              <div className={`w-10 h-10 rounded-2xl bg-zinc-800 light:bg-zinc-100 flex items-center justify-center transition-colors ${sale.status === 'delivered' ? 'text-green-500' : sale.status === 'cancelled' ? 'text-red-500' : 'text-orange-500 group-hover:text-red-500'}`}><Receipt size={20}/></div>
                               <div>
                                  <div className="flex items-center gap-2 mb-1">
                                     <p className="font-black text-zinc-100 light:text-zinc-900 leading-none uppercase tracking-tighter">#{sale.id.split('-')[0]}</p>
@@ -249,7 +258,7 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
                            </div>
                            <div className="flex gap-2">
                               {/* Order Lifecycle Controls */}
-                              {sale.status !== 'delivered' && sale.status !== 'cancelled' ? (
+                              {(!sale.status || sale.status === 'pending') ? (
                                 <>
                                   <button 
                                     onClick={() => handleUpdateStatus(sale.id, 'delivered')}
