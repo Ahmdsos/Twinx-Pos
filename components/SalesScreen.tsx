@@ -266,8 +266,9 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
     let updatedCustomers = [...data.customers];
     let linkedCustomerId: string | undefined = undefined;
 
-    // Fix: Added calculation for cost, profit and loyalty points for new sale record
-    const pointsEarned = Math.floor(total / 10);
+    // TWINX INTEGRITY PROTOCOL: Loyalty points must be strictly 1:1.
+    // 1 Unit of Currency (e.g. 1 EGP) = 1 Point.
+    const pointsEarned = Math.floor(total);
     const totalCost = cart.reduce((acc, item) => acc + (item.costPrice * item.quantity), 0);
     const totalProfit = total - totalCost;
 
@@ -276,7 +277,7 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
       if (existingIndex > -1) {
         const existing = data.customers[existingIndex];
         linkedCustomerId = existing.id;
-        // Fix: Update existing customer stats for state integrity
+        // Ensure points are persisted correctly to the profile
         updatedCustomers[existingIndex] = {
           ...existing,
           totalPurchases: existing.totalPurchases + total,
@@ -285,7 +286,6 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
           lastOrderTimestamp: Date.now()
         };
       } else {
-        // Fix: Added missing totalPoints property to new Customer object
         const newCustomer: Customer = {
           id: crypto.randomUUID(),
           name: customerDetails.name || (lang === 'ar' ? 'عميل جديد' : 'New Customer'),
@@ -302,7 +302,6 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
       }
     }
 
-    // Fix: Added missing financial properties (totalCost, totalProfit, pointsEarned) to Sale object
     const newSale: Sale = {
       id: crypto.randomUUID(),
       timestamp: Date.now(),
@@ -335,6 +334,7 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
       return p;
     });
 
+    // ATOMIC COMMIT: Save all related entities in one operation to maintain financial truth
     updateData({ 
       sales: [newSale, ...data.sales], 
       products: updatedProducts, 
@@ -344,7 +344,7 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
     addLog({ 
       action: 'SALE_COMPLETED', 
       category: 'sale', 
-      details: `Retail Sale: ${cart.length} items for ${data.currency} ${total}.` 
+      details: `Retail Sale: ${cart.length} items for ${data.currency} ${total}. Loyalty: +${pointsEarned} pts` 
     });
 
     setSuccessSale({ id: newSale.id, type: 'retail' });
@@ -362,7 +362,6 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
     let partnerToUse = data.partners.find(p => p.contact === traderDetails.contact || p.name.toLowerCase() === traderDetails.name.toLowerCase());
 
     if (!partnerToUse) {
-      // Create new trader record automatically
       const newPartner: WholesalePartner = {
         id: crypto.randomUUID(),
         name: traderDetails.name,
@@ -816,7 +815,7 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
             <button 
               onClick={handleCheckout} 
               disabled={cart.length === 0}
-              className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all shadow-2xl shadow-red-900/40"
+              className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-10 py-5 rounded-2xl font-black uppercase tracking-widest text-xs transition-all shadow-2xl shadow-red-900/40"
             >
               {t.authorize_payment}
             </button>

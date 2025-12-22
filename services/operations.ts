@@ -1,3 +1,4 @@
+
 import { AppData, Sale, WholesaleTransaction, SaleReturn, Expense, LogEntry, Product, Customer, Employee, Attendance, SalaryTransaction, StockLog } from '../types';
 
 /**
@@ -36,7 +37,7 @@ export const TwinXOps = {
   /**
    * Processes a retail sale atomically.
    * PROTOCOL: Snapshot -> Mutate (Stock, Customer, Sale, Logs) -> Return New State.
-   * FIX: Enforced 1:1 Loyalty Point ratio.
+   * TWINX INTEGRITY: Loyalty points are strictly 1:1 (1 Unit spent = 1 Point).
    */
   processRetailSale: (currentData: AppData, saleData: Partial<Sale>): AppData => {
     const newData: AppData = JSON.parse(JSON.stringify(currentData));
@@ -91,7 +92,7 @@ export const TwinXOps = {
       status: saleData.status || (saleData.isDelivery ? 'pending' : 'completed')
     };
 
-    // 2. Update Customer Stats and Loyalty
+    // 2. Update Customer Stats and Loyalty (Persistence check)
     if (finalSale.customerId) {
       const cIndex = newData.customers.findIndex(c => c.id === finalSale.customerId);
       if (cIndex >= 0) {
