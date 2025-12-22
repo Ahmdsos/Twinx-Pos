@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   LayoutDashboard, 
   ShoppingCart, 
@@ -18,7 +18,7 @@ import {
   Contact,
   UserCircle
 } from 'lucide-react';
-import { AppData, ViewType, DraftInvoice, LogEntry, Sale } from './types';
+import { AppData, ViewType, DraftInvoice, LogEntry, Sale, Role } from './types';
 import { storageService } from './services/storage';
 import { translations, Language } from './translations';
 import Dashboard from './components/Dashboard';
@@ -44,8 +44,11 @@ const App: React.FC = () => {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('twinx_theme') as 'light' | 'dark') || 'dark';
   });
+  
+  // Role State (Default to admin for full access, typically synced from login session)
+  const [userRole, setUserRole] = useState<Role>('admin');
+
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
-  // Fix: Added categories and stockLogs to satisfy AppData interface
   const [data, setData] = useState<AppData>({
     products: [],
     sales: [],
@@ -92,7 +95,6 @@ const App: React.FC = () => {
       (d: DraftInvoice) => now - d.timestamp < expiryMs
     );
 
-    // Fix: Added categories and stockLogs to cleanedData to satisfy AppData interface
     const cleanedData: AppData = {
       ...loadedData,
       returns: loadedData.returns || [],
@@ -140,14 +142,13 @@ const App: React.FC = () => {
     });
   }, []);
 
-  const totalRetailSales = data.sales.reduce((acc, sale) => acc + sale.total, 0);
+  // Net Cash Logic (Financial Truth Implementation)
+  const totalRetailSales = data.sales.reduce((acc, sale) => acc + (sale.paidAmount || 0), 0);
   const totalExpenses = data.expenses.reduce((acc, exp) => acc + exp.amount, 0);
   const totalRefunds = data.returns?.reduce((acc, ret) => acc + ret.totalRefund, 0) || 0;
-  
   const totalWholesaleReceived = (data.wholesaleTransactions || [])
     .filter(t => t.type === 'sale')
     .reduce((acc, t) => acc + t.paidAmount, 0);
-  
   const totalWholesalePaidOut = (data.wholesaleTransactions || [])
     .filter(t => t.type === 'purchase')
     .reduce((acc, t) => acc + t.paidAmount, 0);
@@ -187,38 +188,54 @@ const App: React.FC = () => {
     }
   };
 
-  const navItems = [
-    { id: 'dashboard', label: t.dashboard, icon: <LayoutDashboard size={20} /> },
-    { id: 'sales', label: t.sales, icon: <ShoppingCart size={20} /> },
-    { id: 'wholesale', label: t.wholesale, icon: <Users size={20} /> },
-    { id: 'customers', label: t.customers, icon: <Contact size={20} /> },
-    { id: 'hr', label: t.hr, icon: <UserCircle size={20} /> },
-    { id: 'delivery', label: t.delivery, icon: <Truck size={20} /> },
-    { id: 'inventory', label: t.inventory, icon: <Package size={20} /> },
-    { id: 'reports', label: t.reports, icon: <BarChart3 size={20} /> },
-    { id: 'returns', label: t.returns, icon: <RotateCcw size={20} /> },
-    { id: 'expenses', label: t.expenses, icon: <Receipt size={20} /> },
-    { id: 'intelligence', label: t.intelligence, icon: <Zap size={20} /> },
-    { id: 'logs', label: t.logs, icon: <ShieldCheck size={20} /> },
-    { id: 'settings', label: t.settings, icon: <SettingsIcon size={20} /> },
-  ] as const;
+  // Nav Items with Permission Gates
+  const navItems = useMemo(() => {
+    // FIX: Using explicit typing instead of 'as const' to avoid narrowed tuple type errors with '.includes()'
+    interface NavItem {
+      id: string;
+      label: string;
+      icon: React.ReactNode;
+      roles: Role[];
+    }
+    const items: NavItem[] = [
+      { id: 'dashboard', label: t.dashboard, icon: <LayoutDashboard size={20} />, roles: ['admin', 'cashier', 'delivery'] },
+      { id: 'sales', label: t.sales, icon: <ShoppingCart size={20} />, roles: ['admin', 'cashier'] },
+      { id: 'wholesale', label: t.wholesale, icon: <Users size={20} />, roles: ['admin'] },
+      { id: 'customers', label: t.customers, icon: <Contact size={20} />, roles: ['admin', 'cashier'] },
+      { id: 'hr', label: t.hr, icon: <UserCircle size={20} />, roles: ['admin'] },
+      { id: 'delivery', label: t.delivery, icon: <Truck size={20} />, roles: ['admin', 'cashier', 'delivery'] },
+      { id: 'inventory', label: t.inventory, icon: <Package size={20} />, roles: ['admin', 'cashier'] },
+      { id: 'reports', label: t.reports, icon: <BarChart3 size={20} />, roles: ['admin'] },
+      { id: 'returns', label: t.returns, icon: <RotateCcw size={20} />, roles: ['admin', 'cashier'] },
+      { id: 'expenses', label: t.expenses, icon: <Receipt size={20} />, roles: ['admin'] },
+      { id: 'intelligence', label: t.intelligence, icon: <Zap size={20} />, roles: ['admin'] },
+      { id: 'logs', label: t.logs, icon: <ShieldCheck size={20} />, roles: ['admin'] },
+      { id: 'settings', label: t.settings, icon: <SettingsIcon size={20} />, roles: ['admin'] },
+    ];
+
+    return items.filter(item => item.roles.includes(userRole));
+  }, [t, userRole]);
 
   return (
-    <div className={`flex h-screen bg-zinc-950 light:bg-zinc-50 text-zinc-100 light:text-zinc-900 overflow-hidden transition-all duration-500 ${lang === 'ar' ? 'font-sans' : 'font-sans'}`}>
-      <aside className="w-64 border-zinc-800 light:border-zinc-200 bg-black light:bg-white flex flex-col border-e shrink-0 transition-all duration-500">
+    <div className={`flex min-h-screen bg-zinc-950 light:bg-zinc-50 text-zinc-100 light:text-zinc-900 overflow-hidden transition-all duration-500`}>
+      {/* FIXED SIDEBAR */}
+      <aside className={`fixed top-0 bottom-0 ${lang === 'ar' ? 'right-0' : 'left-0'} w-64 border-zinc-800 light:border-zinc-200 bg-black light:bg-white flex flex-col border-e shrink-0 transition-all duration-500 z-50`}>
         <div className="p-6 border-b border-zinc-800 light:border-zinc-200">
           <h1 className="text-2xl font-bold tracking-tighter flex items-center gap-2">
             <span className="bg-red-600 text-white px-2 py-0.5 rounded shadow-lg shadow-red-900/20">T</span>
             <span className="light:text-zinc-900 uppercase">TWIN<span className="text-red-600">X</span></span>
           </h1>
           <p className="text-[9px] text-zinc-500 mt-1 uppercase tracking-widest font-black opacity-60">Professional Retail Suite</p>
+          <div className="mt-2 inline-block px-2 py-0.5 rounded bg-zinc-900 light:bg-zinc-100 border border-zinc-800 light:border-zinc-200 text-[8px] font-black text-red-500 uppercase tracking-widest">
+            {userRole} Access
+          </div>
         </div>
 
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto scrollbar-none">
           {navItems.map((item) => (
             <button
               key={item.id}
-              onClick={() => setView(item.id)}
+              onClick={() => setView(item.id as ViewType)}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 ${
                 view === item.id 
                 ? 'bg-red-600 text-white shadow-xl shadow-red-900/20 scale-[1.02]' 
@@ -266,8 +283,9 @@ const App: React.FC = () => {
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col overflow-hidden relative">
-        <header className="h-16 border-b border-zinc-800 light:border-zinc-200 flex items-center justify-between px-8 bg-zinc-950 light:bg-white z-10 shrink-0 transition-all duration-500">
+      {/* MAIN CONTENT AREA */}
+      <main className={`flex-1 flex flex-col ${lang === 'ar' ? 'mr-64' : 'ml-64'} transition-all duration-500 min-h-screen overflow-hidden`}>
+        <header className="h-16 border-b border-zinc-800 light:border-zinc-200 flex items-center justify-between px-8 bg-zinc-950 light:bg-white z-40 shrink-0 transition-all duration-500 shadow-sm">
           <div className="flex items-center gap-4">
             <h2 className="text-lg font-black uppercase tracking-widest text-zinc-500 light:text-zinc-900">{t[view as keyof typeof t] || view}</h2>
           </div>
@@ -281,11 +299,12 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        <div className="flex-1 overflow-auto bg-zinc-950 light:bg-zinc-50 transition-all duration-500">
+        <div className="flex-1 overflow-auto bg-zinc-950 light:bg-zinc-50 transition-all duration-500 p-6">
           {renderView()}
         </div>
       </main>
 
+      {/* OVERLAYS */}
       {selectedSale && (
         <SaleDetailsModal 
           sale={selectedSale} 

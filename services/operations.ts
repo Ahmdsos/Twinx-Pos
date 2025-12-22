@@ -2,7 +2,7 @@ import { AppData, Sale, WholesaleTransaction, SaleReturn, Expense, LogEntry, Pro
 
 /**
  * TwinX Operations Service
- * Pure state transformers ensuring "Atomic Transactions" and business integrity.
+ * Pure state transformers ensuring "Atomic Transactions" and financial integrity.
  */
 
 const createLog = (action: string, category: LogEntry['category'], details: string): LogEntry => ({
@@ -17,19 +17,32 @@ const getTodayString = () => new Date().toISOString().split('T')[0];
 
 export const TwinXOps = {
   /**
+   * Financial Truth Helpers
+   */
+  getTotals: (data: AppData) => {
+    const receivables = data.sales.reduce((acc, s) => acc + (s.remainingAmount || 0), 0) +
+      data.wholesaleTransactions
+        .filter(t => t.type === 'sale')
+        .reduce((acc, t) => acc + (t.total - t.paidAmount), 0);
+
+    const payables = data.wholesaleTransactions
+      .filter(t => t.type === 'purchase')
+      .reduce((acc, t) => acc + (t.total - t.paidAmount), 0);
+
+    return { receivables, payables };
+  },
+
+  /**
    * Processes a retail sale atomically.
+   * Separates Product Revenue vs Delivery Income.
    */
   processRetailSale: (currentData: AppData, saleData: Partial<Sale>): AppData => {
     const items = saleData.items || [];
     const subtotal = items.reduce((acc, i) => acc + (i.price * i.quantity), 0);
     const discount = saleData.totalDiscount || 0;
-    const delivery = saleData.deliveryFee || 0;
-    const total = (subtotal - discount) + delivery;
-    
-    const paid = saleData.paidAmount ?? total;
-    const remaining = Math.max(0, total - paid);
+    const deliveryIncome = saleData.deliveryFee || 0;
 
-    // Pro Feature: Cost & Profit Calculation
+    // Financial Pro: Product Cost Calculation
     let totalCost = 0;
     for (const item of items) {
       const p = currentData.products.find(prod => prod.id === item.id);
@@ -39,9 +52,18 @@ export const TwinXOps = {
       totalCost += (p.costPrice * item.quantity);
     }
 
-    const totalProfit = total - totalCost;
+    // Total = (Products - Discount) + Delivery
+    const productRevenue = subtotal - discount;
+    const total = productRevenue + deliveryIncome;
     
-    // Loyalty Logic Update: 1 Currency Unit = 1 Point
+    const paid = saleData.paidAmount ?? total;
+    const remaining = Math.max(0, total - paid);
+
+    // Profit Logic: (Product Revenue - Product Cost) + Delivery Fee (100% margin)
+    const productProfit = productRevenue - totalCost;
+    const totalProfit = productProfit + deliveryIncome;
+    
+    // Loyalty Logic: 1 Currency Unit = 1 Point
     const pointsEarned = Math.floor(total); 
 
     const updatedProducts = currentData.products.map(p => {
@@ -62,7 +84,7 @@ export const TwinXOps = {
       customerId: saleData.customerId,
       isDelivery: saleData.isDelivery,
       deliveryDetails: saleData.deliveryDetails,
-      deliveryFee: saleData.deliveryFee,
+      deliveryFee: deliveryIncome,
       driverId: saleData.driverId,
       totalCost,
       totalProfit,
@@ -84,7 +106,7 @@ export const TwinXOps = {
       return c;
     });
 
-    const log = createLog('SALE_COMPLETED', 'sale', `Retail Sale #${finalSale.id.split('-')[0]} for ${total}. Profit: ${totalProfit.toFixed(2)}. Points Earned: ${pointsEarned}.`);
+    const log = createLog('SALE_COMPLETED', 'sale', `Retail Sale #${finalSale.id.split('-')[0]} for ${total}. Net Profit: ${totalProfit.toFixed(2)} (Products: ${productProfit.toFixed(2)}, Delivery: ${deliveryIncome.toFixed(2)}).`);
 
     return {
       ...currentData,
@@ -97,13 +119,17 @@ export const TwinXOps = {
 
   /**
    * Robust Return Processor.
+   * Adjusts stock and profit based on returned items only.
    */
   processReturn: (currentData: AppData, returnRecord: SaleReturn): AppData => {
     const saleIndex = currentData.sales.findIndex(s => s.id === returnRecord.saleId);
     if (saleIndex === -1) throw new Error("Original sale record not found.");
     const originalSale = { ...currentData.sales[saleIndex] };
 
-    const discountRatio = originalSale.subtotal > 0 ? (originalSale.total / originalSale.subtotal) : 1;
+    // Item Discount Ratio for proportional refund calculation (Excludes delivery from ratio)
+    const productDiscountRatio = originalSale.subtotal > 0 
+      ? (originalSale.subtotal - originalSale.totalDiscount) / originalSale.subtotal 
+      : 1;
     
     let totalCalculatedRefund = 0;
     let totalReturnedCost = 0;
@@ -125,19 +151,24 @@ export const TwinXOps = {
         returnedQuantity: currentReturned + returnItem.quantity
       };
 
-      const itemRefundValue = (item.price * returnItem.quantity) * discountRatio;
+      // Refund based on item price after proportional discount
+      const itemRefundValue = (item.price * returnItem.quantity) * productDiscountRatio;
       totalCalculatedRefund += itemRefundValue;
       
-      // Pro: Track returned cost for profit adjustment
+      // Cost to be subtracted from original cost record
       const product = currentData.products.find(p => p.id === returnItem.productId);
       if (product) {
         totalReturnedCost += (product.costPrice * returnItem.quantity);
       }
     }
 
+    // Profit lost = (Refund Amount for items) - (Cost of items)
+    const profitReduction = totalCalculatedRefund - totalReturnedCost;
+
     let refundRemaining = totalCalculatedRefund;
     let newRemainingAmount = originalSale.remainingAmount;
 
+    // Apply refund to existing debt first
     if (newRemainingAmount > 0) {
       const debtDeduction = Math.min(newRemainingAmount, refundRemaining);
       newRemainingAmount -= debtDeduction;
@@ -166,13 +197,14 @@ export const TwinXOps = {
       ...originalSale,
       items: updatedSaleItems,
       remainingAmount: newRemainingAmount,
-      totalProfit: originalSale.totalProfit - (totalCalculatedRefund - totalReturnedCost)
+      totalCost: originalSale.totalCost - totalReturnedCost,
+      totalProfit: originalSale.totalProfit - profitReduction
     };
 
     const log = createLog(
       'RETURN_PROCESSED', 
       'return', 
-      `Return for INV #${originalSale.id.split('-')[0]}. Refund: ${totalCalculatedRefund.toFixed(2)}. Points Reversed: ${pointsToDeduct}.`
+      `Return for INV #${originalSale.id.split('-')[0]}. Refund: ${totalCalculatedRefund.toFixed(2)}. Profit Adjustment: -${profitReduction.toFixed(2)}. Points Reversed: ${pointsToDeduct}.`
     );
 
     return {
@@ -226,9 +258,6 @@ export const TwinXOps = {
     };
   },
 
-  /**
-   * Unified Staff Management.
-   */
   addEmployee: (currentData: AppData, employee: Employee): AppData => {
     const log = createLog('STAFF_ADDED', 'hr', `Registered ${employee.role}: ${employee.name}`);
     return {
@@ -238,23 +267,6 @@ export const TwinXOps = {
     };
   },
 
-  /**
-   * SIMPLE ATTENDANCE LOGGER
-   */
-  recordAttendance: (currentData: AppData, record: Attendance): AppData => {
-    const employee = currentData.employees.find(e => e.id === record.employeeId);
-    const log = createLog('ATTENDANCE_RECORDED', 'hr', `${employee?.name || 'Staff'} marked as ${record.status}`);
-    return {
-      ...currentData,
-      attendance: [...(currentData.attendance || []), record],
-      logs: [log, ...currentData.logs].slice(0, 5000)
-    };
-  },
-
-  /**
-   * ADVANCED HR LOGIC: recordAttendanceAction
-   * Handles state machine for Check-In, Check-Out, and Breaks.
-   */
   recordAttendanceAction: (
     currentData: AppData, 
     employeeId: string, 
@@ -335,9 +347,6 @@ export const TwinXOps = {
     };
   },
 
-  /**
-   * Payroll Logic.
-   */
   processSalaryTransaction: (currentData: AppData, transaction: SalaryTransaction): AppData => {
     const employee = currentData.employees.find(e => e.id === transaction.employeeId);
     if (!employee) throw new Error("Employee not found.");
@@ -360,9 +369,6 @@ export const TwinXOps = {
     };
   },
 
-  /**
-   * INVENTORY: CATEGORY MANAGEMENT
-   */
   addCategory: (currentData: AppData, categoryName: string): AppData => {
     const categories = (currentData.categories || []);
     if (categories.includes(categoryName)) return currentData;
@@ -384,9 +390,6 @@ export const TwinXOps = {
     };
   },
 
-  /**
-   * INVENTORY: STOCK ADJUSTMENTS (STOCKTAKING)
-   */
   adjustStock: (currentData: AppData, productId: string, newQuantity: number, reason: string, employeeId: string): AppData => {
     const products = [...currentData.products];
     const productIndex = products.findIndex(p => p.id === productId);
@@ -396,10 +399,8 @@ export const TwinXOps = {
     const oldStock = product.stock;
     const diff = oldStock - newQuantity;
 
-    // Mutate Product
     products[productIndex] = { ...product, stock: newQuantity };
 
-    // Create Stock Log
     const stockLog: StockLog = {
       id: crypto.randomUUID(),
       productId,
@@ -412,7 +413,6 @@ export const TwinXOps = {
 
     let updatedExpenses = [...(currentData.expenses || [])];
     
-    // Automatic Expense Generation for Losses
     if (diff > 0) {
       const lossValue = diff * product.costPrice;
       const lossExpense: Expense = {
