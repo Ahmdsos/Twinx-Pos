@@ -20,6 +20,7 @@ export const storageService = {
           partners: parsed.partners || [],
           wholesaleTransactions: parsed.wholesaleTransactions || [],
           drivers: parsed.drivers || [],
+          customers: parsed.customers || [],
           initialCash: parsed.initialCash || 0,
           draftExpiryMinutes: parsed.draftExpiryMinutes || 120,
           lastBackupTimestamp: parsed.lastBackupTimestamp
@@ -39,6 +40,7 @@ export const storageService = {
       partners: [],
       wholesaleTransactions: [],
       drivers: [],
+      customers: [],
       initialCash: 0,
       draftExpiryMinutes: 120,
     };
@@ -79,6 +81,7 @@ export const storageService = {
             if (!data.partners) data.partners = [];
             if (!data.wholesaleTransactions) data.wholesaleTransactions = [];
             if (!data.drivers) data.drivers = [];
+            if (!data.customers) data.customers = [];
             resolve(data);
           } else {
             console.error("Invalid ledger format: Missing required fields.");

@@ -14,7 +14,8 @@ import {
   Languages,
   Sun,
   Moon,
-  Truck
+  Truck,
+  Contact
 } from 'lucide-react';
 import { AppData, ViewType, DraftInvoice, LogEntry, Sale } from './types';
 import { storageService } from './services/storage';
@@ -30,6 +31,7 @@ import ReportsScreen from './components/ReportsScreen';
 import AuditLogScreen from './components/AuditLogScreen';
 import WholesaleScreen from './components/WholesaleScreen';
 import DeliveryScreen from './components/DeliveryScreen';
+import CustomersScreen from './components/CustomersScreen';
 import SaleDetailsModal from './components/SaleDetailsModal';
 
 const App: React.FC = () => {
@@ -51,6 +53,7 @@ const App: React.FC = () => {
     partners: [],
     wholesaleTransactions: [],
     drivers: [],
+    customers: [],
     initialCash: 0,
     draftExpiryMinutes: 120,
     currency: 'EGP',
@@ -89,6 +92,7 @@ const App: React.FC = () => {
       partners: loadedData.partners || [],
       wholesaleTransactions: loadedData.wholesaleTransactions || [],
       drivers: loadedData.drivers || [],
+      customers: loadedData.customers || [],
       currency: loadedData.currency || 'EGP'
     };
 
@@ -158,6 +162,8 @@ const App: React.FC = () => {
         return <WholesaleScreen data={data} updateData={updateData} addLog={addLog} lang={lang} />;
       case 'delivery':
         return <DeliveryScreen data={data} updateData={updateData} addLog={addLog} lang={lang} onSelectSale={setSelectedSale} />;
+      case 'customers':
+        return <CustomersScreen data={data} updateData={updateData} addLog={addLog} lang={lang} onSelectSale={setSelectedSale} />;
       case 'settings':
         return <SettingsScreen data={data} updateData={updateData} setData={setData} addLog={addLog} lang={lang} />;
       default:
@@ -169,6 +175,7 @@ const App: React.FC = () => {
     { id: 'dashboard', label: t.dashboard, icon: <LayoutDashboard size={20} /> },
     { id: 'sales', label: t.sales, icon: <ShoppingCart size={20} /> },
     { id: 'wholesale', label: t.wholesale, icon: <Users size={20} /> },
+    { id: 'customers', label: t.customers, icon: <Contact size={20} /> },
     { id: 'delivery', label: t.delivery, icon: <Truck size={20} /> },
     { id: 'inventory', label: t.inventory, icon: <Package size={20} /> },
     { id: 'reports', label: t.reports, icon: <BarChart3 size={20} /> },
@@ -267,6 +274,7 @@ const App: React.FC = () => {
           sale={selectedSale} 
           lang={lang} 
           currency={data.currency || 'EGP'}
+          customers={data.customers}
           onClose={() => setSelectedSale(null)} 
           onUpdate={(updatedSale) => {
             const updatedSales = data.sales.map(s => s.id === updatedSale.id ? updatedSale : s);

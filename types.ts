@@ -23,6 +23,17 @@ export interface DeliveryDetails {
   deliveryAddress: string;
 }
 
+export interface Customer {
+  id: string;
+  name: string;
+  phone: string;
+  address?: string;
+  totalPurchases: number;
+  invoiceCount: number;
+  channelsUsed: SaleChannel[];
+  lastOrderTimestamp?: number;
+}
+
 export interface Driver {
   id: string;
   name: string;
@@ -31,6 +42,8 @@ export interface Driver {
   isActive: boolean;
 }
 
+export type SaleChannel = 'store' | 'social_media' | 'website';
+
 export interface Sale {
   id: string;
   timestamp: number;
@@ -38,6 +51,8 @@ export interface Sale {
   subtotal: number;
   totalDiscount: number;
   total: number;
+  saleChannel: SaleChannel;
+  customerId?: string;
   isDelivery?: boolean;
   deliveryDetails?: DeliveryDetails;
   deliveryFee?: number;
@@ -51,6 +66,8 @@ export interface DraftInvoice {
   subtotal: number;
   totalDiscount: number;
   total: number;
+  saleChannel: SaleChannel;
+  customerId?: string;
   isDelivery?: boolean;
   deliveryDetails?: DeliveryDetails;
   deliveryFee?: number;
@@ -94,6 +111,12 @@ export interface WholesalePartner {
   createdAt: number;
 }
 
+export interface WholesalePayment {
+  amount: number;
+  timestamp: number;
+  remainingAfter: number;
+}
+
 export interface WholesaleTransaction {
   id: string;
   partnerId: string;
@@ -107,6 +130,7 @@ export interface WholesaleTransaction {
   total: number;
   paidAmount: number;
   timestamp: number;
+  payments?: WholesalePayment[];
 }
 
 export interface AppData {
@@ -119,10 +143,11 @@ export interface AppData {
   partners: WholesalePartner[];
   wholesaleTransactions: WholesaleTransaction[];
   drivers: Driver[]; // سجل الطيارين
+  customers: Customer[]; // سجل العملاء
   initialCash: number;
   draftExpiryMinutes: number;
   lastBackupTimestamp?: number;
   currency?: string;
 }
 
-export type ViewType = 'dashboard' | 'sales' | 'inventory' | 'expenses' | 'intelligence' | 'settings' | 'returns' | 'reports' | 'logs' | 'wholesale' | 'delivery';
+export type ViewType = 'dashboard' | 'sales' | 'inventory' | 'expenses' | 'intelligence' | 'settings' | 'returns' | 'reports' | 'logs' | 'wholesale' | 'delivery' | 'customers';

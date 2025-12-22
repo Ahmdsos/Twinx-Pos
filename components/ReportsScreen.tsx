@@ -1,7 +1,8 @@
 
 import React, { useMemo, useState } from 'react';
 import { AppData, Sale, WholesaleTransaction } from '../types';
-import { BarChart3, Calendar, Package, Clock, Receipt, X, Printer, ArrowUpRight, ArrowDownLeft, DollarSign } from 'lucide-react';
+// Add missing History icon import from lucide-react
+import { BarChart3, Calendar, Package, Clock, Receipt, X, Printer, ArrowUpRight, ArrowDownLeft, DollarSign, CheckCircle2, History } from 'lucide-react';
 import { translations, Language } from '../translations';
 
 interface ReportsScreenProps {
@@ -204,9 +205,9 @@ const ReportsScreen: React.FC<ReportsScreenProps> = ({ data, lang, onSelectSale 
 
       {selectedWholesale && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4 animate-in fade-in duration-300">
-          <div className="bg-zinc-900 border border-zinc-800 w-full max-w-2xl rounded-[40px] overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+          <div className="bg-zinc-900 border border-zinc-800 w-full max-w-4xl rounded-[40px] overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
             <div className="p-8 border-b border-zinc-800 flex justify-between items-center bg-black/20 shrink-0">
-              <div>
+              <div className="text-start">
                 <h4 className="text-2xl font-black uppercase tracking-tighter">تفاصيل فاتورة الجملة</h4>
                 <p className="text-[10px] text-zinc-500 font-black tracking-widest uppercase">ID: {selectedWholesale.id.toUpperCase()}</p>
               </div>
@@ -215,47 +216,90 @@ const ReportsScreen: React.FC<ReportsScreenProps> = ({ data, lang, onSelectSale 
                 <button onClick={() => setSelectedWholesale(null)} className="p-3 hover:bg-zinc-800 rounded-full transition-colors text-zinc-500 hover:text-white"><X size={24}/></button>
               </div>
             </div>
-            <div className="p-8 space-y-6 overflow-y-auto scrollbar-thin">
-               <div className="bg-zinc-950 p-6 rounded-3xl border border-zinc-800 space-y-6">
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center gap-4">
-                      <div className={`p-3 rounded-2xl ${selectedWholesale.type === 'sale' ? 'bg-blue-600/10 text-blue-500' : 'bg-orange-600/10 text-orange-500'}`}>
-                        {selectedWholesale.type === 'sale' ? <ArrowUpRight size={24}/> : <ArrowDownLeft size={24}/>}
+            <div className="p-8 grid grid-cols-1 lg:grid-cols-2 gap-8 overflow-y-auto scrollbar-thin">
+               <div className="space-y-6">
+                 <div className="bg-zinc-950 p-6 rounded-3xl border border-zinc-800 space-y-6">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-4 text-start">
+                        <div className={`p-3 rounded-2xl ${selectedWholesale.type === 'sale' ? 'bg-blue-600/10 text-blue-500' : 'bg-orange-600/10 text-orange-500'}`}>
+                          {selectedWholesale.type === 'sale' ? <ArrowUpRight size={24}/> : <ArrowDownLeft size={24}/>}
+                        </div>
+                        <div>
+                          <p className="text-xs font-black text-zinc-500 uppercase">الشريك</p>
+                          <p className="text-xl font-bold text-zinc-100">{data.partners.find(p => p.id === selectedWholesale.partnerId)?.name}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-xs font-black text-zinc-500 uppercase">الشريك</p>
-                        <p className="text-xl font-bold text-zinc-100">{data.partners.find(p => p.id === selectedWholesale.partnerId)?.name}</p>
+                      <div className="text-end">
+                        <p className="text-xs font-black text-zinc-500 uppercase">إجمالي الفاتورة</p>
+                        <p className="text-3xl font-black text-zinc-100">{data.currency} {selectedWholesale.total.toLocaleString()}</p>
+                        {selectedWholesale.total - selectedWholesale.paidAmount <= 0 ? (
+                          <span className="text-[9px] font-black text-green-500 bg-green-500/10 px-2 py-0.5 rounded border border-green-500/20 uppercase tracking-widest inline-flex items-center gap-1 mt-2">
+                             <CheckCircle2 size={10} /> {t.settled}
+                          </span>
+                        ) : (
+                          <span className="text-[9px] font-black text-orange-500 bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20 uppercase tracking-widest inline-flex items-center gap-1 mt-2">
+                             <Clock size={10} /> {t.pending}
+                          </span>
+                        )}
                       </div>
                     </div>
-                    <div className="text-end">
-                      <p className="text-xs font-black text-zinc-500 uppercase">إجمالي الفاتورة</p>
-                      <p className="text-3xl font-black text-zinc-100">{data.currency} {selectedWholesale.total.toLocaleString()}</p>
-                    </div>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-4 pt-6 border-t border-zinc-800">
-                     <div className="p-4 bg-zinc-900/50 rounded-2xl border border-zinc-800">
-                        <p className="text-[10px] font-black text-zinc-500 uppercase mb-1">المبلغ المدفوع</p>
-                        <p className="text-xl font-black text-green-500">{data.currency} {selectedWholesale.paidAmount.toLocaleString()}</p>
+                    <div className="grid grid-cols-2 gap-4 pt-6 border-t border-zinc-800 text-start">
+                       <div className="p-4 bg-zinc-900/50 rounded-2xl border border-zinc-800">
+                          <p className="text-[10px] font-black text-zinc-500 uppercase mb-1">المبلغ المدفوع</p>
+                          <p className="text-xl font-black text-green-500">{data.currency} {selectedWholesale.paidAmount.toLocaleString()}</p>
+                       </div>
+                       <div className="p-4 bg-zinc-900/50 rounded-2xl border border-zinc-800">
+                          <p className="text-[10px] font-black text-zinc-500 uppercase mb-1">المبلغ المتبقي</p>
+                          <p className="text-xl font-black text-orange-500">{data.currency} {(selectedWholesale.total - selectedWholesale.paidAmount).toLocaleString()}</p>
+                       </div>
+                    </div>
+                 </div>
+
+                 <div className="space-y-3 text-start">
+                   <p className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-2 px-2">الأصناف المشحونة</p>
+                   {selectedWholesale.items.map((item, idx) => (
+                     <div key={idx} className="flex justify-between items-center bg-zinc-900 border border-zinc-800 p-4 rounded-2xl">
+                       <div className="text-start">
+                         <p className="font-bold text-zinc-100">{item.name}</p>
+                         <p className="text-xs text-zinc-500">{item.quantity} x {item.unitPrice}</p>
+                       </div>
+                       <p className="font-black text-zinc-100">{data.currency} {(item.quantity * item.unitPrice).toLocaleString()}</p>
                      </div>
-                     <div className="p-4 bg-zinc-900/50 rounded-2xl border border-zinc-800">
-                        <p className="text-[10px] font-black text-zinc-500 uppercase mb-1">المبلغ المتبقي</p>
-                        <p className="text-xl font-black text-orange-500">{data.currency} {(selectedWholesale.total - selectedWholesale.paidAmount).toLocaleString()}</p>
-                     </div>
-                  </div>
+                   ))}
+                 </div>
                </div>
 
-               <div className="space-y-3">
-                 <p className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-2 px-2">الأصناف المشحونة</p>
-                 {selectedWholesale.items.map((item, idx) => (
-                   <div key={idx} className="flex justify-between items-center bg-zinc-900 border border-zinc-800 p-4 rounded-2xl">
-                     <div className="text-start">
-                       <p className="font-bold text-zinc-100">{item.name}</p>
-                       <p className="text-xs text-zinc-500">{item.quantity} x {item.unitPrice}</p>
-                     </div>
-                     <p className="font-black text-zinc-100">{data.currency} {(item.quantity * item.unitPrice).toLocaleString()}</p>
-                   </div>
-                 ))}
+               <div className="space-y-4 text-start">
+                  <p className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-2 px-2">{t.payment_history}</p>
+                  <div className="bg-zinc-950 border border-zinc-800 rounded-[32px] overflow-hidden">
+                     {selectedWholesale.payments && selectedWholesale.payments.length > 0 ? (
+                        <div className="divide-y divide-zinc-800">
+                           {selectedWholesale.payments.map((p, idx) => (
+                              <div key={idx} className="p-6 flex justify-between items-center hover:bg-zinc-900 transition-colors">
+                                 <div className="flex items-center gap-4">
+                                    <div className="w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center text-green-500 border border-green-500/20">
+                                       <DollarSign size={18}/>
+                                    </div>
+                                    <div>
+                                       <p className="font-bold text-zinc-100">{data.currency} {p.amount.toLocaleString()}</p>
+                                       <p className="text-[10px] text-zinc-500 uppercase font-black">{new Date(p.timestamp).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US')}</p>
+                                    </div>
+                                 </div>
+                                 <div className="text-end">
+                                    <p className="text-[10px] text-zinc-600 uppercase font-black">{t.remaining}</p>
+                                    <p className="text-sm font-bold text-zinc-400">{data.currency} {p.remainingAfter.toLocaleString()}</p>
+                                 </div>
+                              </div>
+                           ))}
+                        </div>
+                     ) : (
+                        <div className="p-12 text-center opacity-20">
+                           <History size={40} className="mx-auto mb-2" />
+                           <p className="text-xs font-black uppercase">لا توجد دفعات مسجلة</p>
+                        </div>
+                     )}
+                  </div>
                </div>
             </div>
           </div>

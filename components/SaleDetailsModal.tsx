@@ -1,23 +1,26 @@
 
 import React, { useState } from 'react';
-import { Sale, CartItem } from '../types';
+import { Sale, CartItem, Customer } from '../types';
 import { translations, Language } from '../translations';
-import { X, Printer, Trash2, Save, ShoppingBag, Clock, User, Phone, MapPin, Truck } from 'lucide-react';
+import { X, Printer, Trash2, Save, ShoppingBag, Clock, User, Phone, MapPin, Truck, Layout, Hash, DollarSign } from 'lucide-react';
 import JsBarcode from 'jsbarcode';
 
 interface SaleDetailsModalProps {
   sale: Sale;
   lang: Language;
   currency: string;
+  customers?: Customer[]; // Optional prop to lookup customer stats
   onClose: () => void;
   onUpdate: (updatedSale: Sale) => void;
   onDelete: (id: string) => void;
 }
 
 // Added currency prop to match App.tsx usage and support multi-currency display
-const SaleDetailsModal: React.FC<SaleDetailsModalProps> = ({ sale, lang, currency, onClose, onUpdate, onDelete }) => {
+const SaleDetailsModal: React.FC<SaleDetailsModalProps> = ({ sale, lang, currency, customers = [], onClose, onUpdate, onDelete }) => {
   const t = translations[lang];
   const [editedSale, setEditedSale] = useState<Sale>({ ...sale });
+
+  const linkedCustomer = customers.find(c => c.id === editedSale.customerId);
 
   const printInvoice = () => {
     const printArea = document.getElementById('print-area');
@@ -35,6 +38,7 @@ const SaleDetailsModal: React.FC<SaleDetailsModalProps> = ({ sale, lang, currenc
           <div>${lang === 'ar' ? 'رقم الفاتورة' : 'INV'}: ${editedSale.id.split('-')[0].toUpperCase()}</div>
           <div>${lang === 'ar' ? 'التاريخ' : 'DATE'}: ${dateStr}</div>
           <div>${lang === 'ar' ? 'الوقت' : 'TIME'}: ${timeStr}</div>
+          <div>${lang === 'ar' ? 'القناة' : 'CHANNEL'}: ${t[editedSale.saleChannel as keyof typeof t].toUpperCase()}</div>
         </div>
         ${editedSale.isDelivery ? `
         <div style="border-top: 1px dashed black; padding: 2mm 0; margin-bottom: 2mm; font-size: 8pt;">
@@ -129,6 +133,10 @@ const SaleDetailsModal: React.FC<SaleDetailsModalProps> = ({ sale, lang, currenc
                    <span className="text-xs font-bold">{new Date(editedSale.timestamp).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US')}</span>
                  </div>
                  <div className="flex items-center justify-between p-4 bg-zinc-800/30 rounded-2xl border border-zinc-800">
+                   <span className="text-xs text-zinc-500">{t.sale_channel}</span>
+                   <span className="text-xs font-bold uppercase text-red-500">{t[editedSale.saleChannel as keyof typeof t]}</span>
+                 </div>
+                 <div className="flex items-center justify-between p-4 bg-zinc-800/30 rounded-2xl border border-zinc-800">
                    <span className="text-xs text-zinc-500">{lang === 'ar' ? 'حالة التوصيل' : 'Delivery Status'}</span>
                    <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${editedSale.isDelivery ? 'bg-orange-500/10 text-orange-500' : 'bg-green-500/10 text-green-500'}`}>
                      {editedSale.isDelivery ? t.delivery_scheduled : (lang === 'ar' ? 'داخل المتجر' : 'In-Store')}
@@ -137,24 +145,39 @@ const SaleDetailsModal: React.FC<SaleDetailsModalProps> = ({ sale, lang, currenc
               </div>
             </section>
 
-            {editedSale.isDelivery && editedSale.deliveryDetails && (
+            {(editedSale.customerId || editedSale.isDelivery) && (
               <section className="space-y-4 animate-in fade-in duration-500">
-                <div className="flex items-center gap-3 text-orange-500 font-black uppercase tracking-widest text-xs">
-                  <Truck size={18} /> {lang === 'ar' ? 'بيانات التوصيل' : 'Delivery Details'}
+                <div className="flex items-center gap-3 text-blue-500 font-black uppercase tracking-widest text-xs">
+                  <User size={18} /> {t.customer_details}
                 </div>
                 <div className="bg-zinc-800/20 p-6 rounded-[32px] border border-zinc-800 space-y-4">
                   <div className="flex items-center gap-4">
                     <User size={16} className="text-zinc-600" />
-                    <input type="text" className="bg-transparent border-none p-0 text-sm font-bold text-zinc-100 focus:ring-0 w-full" value={editedSale.deliveryDetails.customerName} onChange={e => setEditedSale({...editedSale, deliveryDetails: {...editedSale.deliveryDetails!, customerName: e.target.value}})} />
+                    <span className="text-sm font-bold text-zinc-100">{linkedCustomer?.name || editedSale.deliveryDetails?.customerName}</span>
                   </div>
                   <div className="flex items-center gap-4">
                     <Phone size={16} className="text-zinc-600" />
-                    <input type="text" className="bg-transparent border-none p-0 text-sm font-bold text-zinc-400 font-mono focus:ring-0 w-full" value={editedSale.deliveryDetails.customerPhone} onChange={e => setEditedSale({...editedSale, deliveryDetails: {...editedSale.deliveryDetails!, customerPhone: e.target.value}})} />
+                    <span className="text-sm font-bold text-zinc-400 font-mono">{linkedCustomer?.phone || editedSale.deliveryDetails?.customerPhone}</span>
                   </div>
-                  <div className="flex items-start gap-4">
-                    <MapPin size={16} className="text-zinc-600 mt-1" />
-                    <textarea className="bg-transparent border-none p-0 text-sm font-bold text-zinc-400 focus:ring-0 w-full resize-none" rows={2} value={editedSale.deliveryDetails.deliveryAddress} onChange={e => setEditedSale({...editedSale, deliveryDetails: {...editedSale.deliveryDetails!, deliveryAddress: e.target.value}})} />
-                  </div>
+                  { (linkedCustomer?.address || editedSale.deliveryDetails?.deliveryAddress) && (
+                    <div className="flex items-start gap-4">
+                      <MapPin size={16} className="text-zinc-600 mt-1" />
+                      <span className="text-sm font-bold text-zinc-400">{linkedCustomer?.address || editedSale.deliveryDetails?.deliveryAddress}</span>
+                    </div>
+                  )}
+                  
+                  {linkedCustomer && (
+                    <div className="pt-4 border-t border-zinc-800/50 flex gap-4">
+                       <div className="flex-1">
+                          <p className="text-[8px] font-black uppercase text-zinc-500 mb-1">{t.total_purchases}</p>
+                          <p className="text-xs font-black text-blue-500 flex items-center gap-1"><DollarSign size={12}/> {linkedCustomer.totalPurchases.toLocaleString()}</p>
+                       </div>
+                       <div className="flex-1">
+                          <p className="text-[8px] font-black uppercase text-zinc-500 mb-1">{t.invoice_count}</p>
+                          <p className="text-xs font-black text-zinc-300 flex items-center gap-1"><Hash size={12}/> {linkedCustomer.invoiceCount}</p>
+                       </div>
+                    </div>
+                  )}
                 </div>
               </section>
             )}

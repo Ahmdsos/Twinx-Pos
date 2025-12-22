@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { AppData, WholesalePartner, WholesaleTransaction, LogEntry, Product } from '../types';
+import { AppData, WholesalePartner, WholesaleTransaction, LogEntry, Product, WholesalePayment } from '../types';
 import { translations, Language } from '../translations';
 import { 
   Users, 
@@ -17,7 +17,9 @@ import {
   History,
   DollarSign,
   AlertCircle,
-  Coins
+  Coins,
+  CheckCircle2,
+  Clock
 } from 'lucide-react';
 
 interface WholesaleScreenProps {
@@ -113,7 +115,8 @@ const WholesaleScreen: React.FC<WholesaleScreenProps> = ({ data, updateData, add
         name: data.products.find(p => p.id === i.productId)?.name || 'Unknown',
         quantity: i.quantity,
         unitPrice: i.unitPrice
-      }))
+      })),
+      payments: paidAmount > 0 ? [{ amount: paidAmount, timestamp: Date.now(), remainingAfter: total - paidAmount }] : []
     };
 
     const updatedProducts = data.products.map(p => {
@@ -145,9 +148,20 @@ const WholesaleScreen: React.FC<WholesaleScreenProps> = ({ data, updateData, add
 
   const handleDebtPayment = () => {
     if (!showPaymentModal || paymentAmount <= 0) return;
+    
     const updatedTransactions = data.wholesaleTransactions.map(t => {
       if (t.id === showPaymentModal.id) {
-        return { ...t, paidAmount: t.paidAmount + paymentAmount };
+        const newPaidAmount = t.paidAmount + paymentAmount;
+        const newPaymentRecord: WholesalePayment = {
+          amount: paymentAmount,
+          timestamp: Date.now(),
+          remainingAfter: t.total - newPaidAmount
+        };
+        return { 
+          ...t, 
+          paidAmount: newPaidAmount,
+          payments: [...(t.payments || []), newPaymentRecord]
+        };
       }
       return t;
     });
@@ -229,7 +243,7 @@ const WholesaleScreen: React.FC<WholesaleScreenProps> = ({ data, updateData, add
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 overflow-hidden">
         <div className="lg:col-span-1 bg-zinc-900/30 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-[32px] overflow-hidden flex flex-col backdrop-blur-sm light:shadow-sm">
-          <div className="p-4 bg-black/40 light:bg-zinc-100 border-b border-zinc-800 light:border-zinc-200 text-[10px] uppercase font-black tracking-widest text-zinc-500">
+          <div className="p-4 bg-black/40 light:bg-zinc-100 border-b border-zinc-800 light:border-zinc-200 text-[10px] uppercase font-black tracking-widest text-zinc-500 px-6">
              {lang === 'ar' ? 'السجلات النشطة' : 'Active Records'} ({filteredPartners.length})
           </div>
           <div className="flex-1 overflow-y-auto divide-y divide-zinc-800/50 light:divide-zinc-200 scrollbar-thin">
@@ -288,6 +302,7 @@ const WholesaleScreen: React.FC<WholesaleScreenProps> = ({ data, updateData, add
                 </div>
                 {partnerTransactions.map(t_item => {
                   const remaining = t_item.total - t_item.paidAmount;
+                  const isSettled = remaining <= 0;
                   return (
                     <div key={t_item.id} className="bg-zinc-900/50 light:bg-white border border-zinc-800 light:border-zinc-200 p-6 rounded-[24px] group light:shadow-sm">
                        <div className="flex justify-between items-start mb-4">
@@ -303,25 +318,48 @@ const WholesaleScreen: React.FC<WholesaleScreenProps> = ({ data, updateData, add
                           <div className="flex items-center gap-4">
                             <div className="text-end">
                               <p className="text-2xl font-black text-zinc-100 light:text-zinc-900">{data.currency} {t_item.total.toLocaleString()}</p>
-                              {remaining > 0 && (
-                                  <span className="text-[10px] font-black text-orange-500 bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20 uppercase tracking-widest animate-pulse">
-                                    {lang === 'ar' ? 'متبقي: ' : 'Rem: '} {data.currency} {remaining.toLocaleString()}
-                                  </span>
+                              {isSettled ? (
+                                <span className="text-[10px] font-black text-green-500 bg-green-500/10 px-2 py-0.5 rounded border border-green-500/20 uppercase tracking-widest flex items-center gap-1">
+                                  <CheckCircle2 size={10} /> {t.settled}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-black text-orange-500 bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20 uppercase tracking-widest animate-pulse">
+                                  {lang === 'ar' ? 'متبقي: ' : 'Rem: '} {data.currency} {remaining.toLocaleString()}
+                                </span>
                               )}
                             </div>
-                            {remaining > 0 && (
+                            {!isSettled && (
                               <button onClick={() => setShowPaymentModal(t_item)} className="p-3 bg-orange-600 text-white rounded-xl hover:bg-orange-700 transition-all shadow-lg" title={t.add_payment}><Coins size={20}/></button>
                             )}
                           </div>
                        </div>
-                       <div className="grid grid-cols-2 gap-4 pt-4 border-t border-zinc-800/50 light:border-zinc-100">
+                       
+                       {/* سجل المدفوعات داخل العملية */}
+                       {t_item.payments && t_item.payments.length > 0 && (
+                         <div className="mt-4 pt-4 border-t border-zinc-800/50 light:border-zinc-100 space-y-2">
+                            <p className="text-[9px] font-black text-zinc-500 uppercase flex items-center gap-1.5"><Clock size={10}/> {t.payment_history}</p>
+                            <div className="space-y-1">
+                               {t_item.payments.map((p, idx) => (
+                                 <div key={idx} className="flex items-center justify-between text-[11px] bg-black/20 light:bg-zinc-50 p-2 rounded-lg border border-zinc-800/30 light:border-zinc-200">
+                                    <span className="text-zinc-500 font-mono">{new Date(p.timestamp).toLocaleDateString()}</span>
+                                    <div className="flex items-center gap-4">
+                                       <span className="text-zinc-100 light:text-zinc-900 font-bold">{data.currency} {p.amount.toLocaleString()}</span>
+                                       <span className="text-[9px] text-zinc-600 uppercase font-black">{t.remaining}: {p.remainingAfter.toLocaleString()}</span>
+                                    </div>
+                                 </div>
+                               ))}
+                            </div>
+                         </div>
+                       )}
+
+                       <div className="grid grid-cols-2 gap-4 pt-4 mt-4 border-t border-zinc-800/50 light:border-zinc-100">
                           <div>
                             <p className="text-[9px] font-black text-zinc-500 uppercase mb-1">{t.paid_amount}</p>
                             <p className="text-xs font-bold text-zinc-300 light:text-zinc-600">{data.currency} {t_item.paidAmount.toLocaleString()}</p>
                           </div>
                           <div className="text-end">
                             <p className="text-[9px] font-black text-zinc-500 uppercase mb-1">{t.remaining_amount}</p>
-                            <p className={`text-xs font-bold ${remaining > 0 ? 'text-orange-500' : 'text-zinc-500'}`}>{data.currency} {remaining.toLocaleString()}</p>
+                            <p className={`text-xs font-bold ${remaining > 0 ? 'text-orange-500' : 'text-green-500'}`}>{data.currency} {remaining.toLocaleString()}</p>
                           </div>
                        </div>
                     </div>
