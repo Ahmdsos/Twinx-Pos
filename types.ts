@@ -13,7 +13,7 @@ export interface Product {
 
 export interface CartItem extends Product {
   quantity: number;
-  returnedQuantity?: number; // Added for return tracking integrity
+  returnedQuantity?: number;
   discount?: number;
   discountType?: 'percentage' | 'fixed';
 }
@@ -35,14 +35,6 @@ export interface Customer {
   lastOrderTimestamp?: number;
 }
 
-export interface Driver {
-  id: string;
-  name: string;
-  phone: string;
-  vehicleId?: string;
-  isActive: boolean;
-}
-
 export type Role = 'admin' | 'cashier' | 'delivery';
 
 export interface Employee {
@@ -51,15 +43,24 @@ export interface Employee {
   phone: string;
   role: Role;
   baseSalary: number;
-  joinDate: number;
+  joinDate: string; // Changed to string per requirements
   isActive: boolean;
+  notes?: string;
+  vehicleId?: string; // Maintained for role === 'delivery'
 }
+
+// Added Driver type alias to fix import errors in DeliveryScreen
+export type Driver = Employee;
 
 export interface Attendance {
   id: string;
   employeeId: string;
-  timestamp: number;
-  status: 'present' | 'absent' | 'late' | 'leave';
+  date: string; // YYYY-MM-DD for uniqueness
+  timestamp: number; // Added for UI filtering
+  checkIn?: number;
+  checkOut?: number;
+  breaks: { start: number; end?: number }[];
+  status: 'present' | 'on_break' | 'completed' | 'late' | 'absent'; // Added late and absent
 }
 
 export interface SalaryTransaction {
@@ -79,8 +80,8 @@ export interface Sale {
   items: CartItem[];
   subtotal: number;
   totalDiscount: number;
-  discountType?: 'percentage' | 'fixed'; // Added for logic clarity
-  discountValue?: number; // Added for logic clarity
+  discountType?: 'percentage' | 'fixed';
+  discountValue?: number;
   total: number;
   paidAmount: number;
   remainingAmount: number;
@@ -89,7 +90,7 @@ export interface Sale {
   isDelivery?: boolean;
   deliveryDetails?: DeliveryDetails;
   deliveryFee?: number;
-  driverId?: string;
+  driverId?: string; // This links to an Employee with role 'delivery'
 }
 
 export interface DraftInvoice {
@@ -176,9 +177,9 @@ export interface AppData {
   logs: LogEntry[];
   partners: WholesalePartner[];
   wholesaleTransactions: WholesaleTransaction[];
-  drivers: Driver[];
-  customers: Customer[];
-  employees: Employee[];
+  drivers: Employee[]; // Added to fix missing property errors
+  customers: Customer[]; // Added to fix missing property errors
+  employees: Employee[]; // Unified Staff
   attendance: Attendance[];
   salaryTransactions: SalaryTransaction[];
   initialCash: number;

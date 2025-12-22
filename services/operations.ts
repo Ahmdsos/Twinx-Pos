@@ -2,7 +2,7 @@ import { AppData, Sale, WholesaleTransaction, SaleReturn, Expense, LogEntry, Pro
 
 /**
  * TwinX Operations Service
- * Pure state transformers to ensure "Atomic Transactions" and business integrity.
+ * Pure state transformers ensuring "Atomic Transactions" and business integrity.
  */
 
 const createLog = (action: string, category: LogEntry['category'], details: string): LogEntry => ({
@@ -13,10 +13,11 @@ const createLog = (action: string, category: LogEntry['category'], details: stri
   details,
 });
 
+const getTodayString = () => new Date().toISOString().split('T')[0];
+
 export const TwinXOps = {
   /**
    * Processes a retail sale atomically.
-   * Calculates financial truth, deducts stock, and updates customer loyalty.
    */
   processRetailSale: (currentData: AppData, saleData: Partial<Sale>): AppData => {
     const items = saleData.items || [];
@@ -28,7 +29,6 @@ export const TwinXOps = {
     const paid = saleData.paidAmount ?? total;
     const remaining = Math.max(0, total - paid);
 
-    // 1. Validate Stock
     for (const item of items) {
       const p = currentData.products.find(prod => prod.id === item.id);
       if (!p || p.stock < item.quantity) {
@@ -36,13 +36,11 @@ export const TwinXOps = {
       }
     }
 
-    // 2. Update Products
     const updatedProducts = currentData.products.map(p => {
       const sold = items.find(i => i.id === p.id);
       return sold ? { ...p, stock: p.stock - sold.quantity } : p;
     });
 
-    // 3. Prepare Sale Object
     const finalSale: Sale = {
       id: saleData.id || crypto.randomUUID(),
       timestamp: saleData.timestamp || Date.now(),
@@ -60,7 +58,6 @@ export const TwinXOps = {
       driverId: saleData.driverId
     };
 
-    // 4. Update Customer Profile
     const updatedCustomers = currentData.customers.map(c => {
       if (c.id === saleData.customerId) {
         return {
@@ -86,23 +83,18 @@ export const TwinXOps = {
   },
 
   /**
-   * Robust Return Processor (TwinX Integrity Protocol)
-   * Handles proportional discounts, debt reduction, and atomic quantity tracking.
+   * Robust Return Processor.
    */
   processReturn: (currentData: AppData, returnRecord: SaleReturn): AppData => {
-    // 1. Find and Clone Original Sale for mutation
     const saleIndex = currentData.sales.findIndex(s => s.id === returnRecord.saleId);
     if (saleIndex === -1) throw new Error("Original sale record not found.");
     const originalSale = { ...currentData.sales[saleIndex] };
 
-    // 2. Calculate Effective Price (The Golden Ratio)
-    // Ensures we refund exactly what was paid proportionally after global discounts/delivery.
     const discountRatio = originalSale.subtotal > 0 ? (originalSale.total / originalSale.subtotal) : 1;
     
     let totalCalculatedRefund = 0;
     const updatedSaleItems = [...originalSale.items];
 
-    // 3. Validate and Update Quantities
     for (const returnItem of returnRecord.items) {
       const itemIndex = updatedSaleItems.findIndex(i => i.id === returnItem.productId);
       if (itemIndex === -1) throw new Error(`Product ${returnItem.productId} not found in original sale.`);
@@ -111,21 +103,18 @@ export const TwinXOps = {
       const currentReturned = item.returnedQuantity || 0;
       
       if (currentReturned + returnItem.quantity > item.quantity) {
-        throw new Error(`Integrity Violation: Cannot return ${returnItem.quantity} units of ${item.name}. Already returned: ${currentReturned}/${item.quantity}`);
+        throw new Error(`Cannot return ${returnItem.quantity} units. Already returned: ${currentReturned}/${item.quantity}`);
       }
 
-      // Update the sale record's returned quantity (Atomic lock)
       updatedSaleItems[itemIndex] = {
         ...item,
         returnedQuantity: currentReturned + returnItem.quantity
       };
 
-      // Calculate proportional refund for this specific item
       const itemRefundValue = (item.price * returnItem.quantity) * discountRatio;
       totalCalculatedRefund += itemRefundValue;
     }
 
-    // 4. Financial Truth: Debt vs Cash Settlement
     let refundRemaining = totalCalculatedRefund;
     let newRemainingAmount = originalSale.remainingAmount;
 
@@ -135,14 +124,11 @@ export const TwinXOps = {
       refundRemaining -= debtDeduction;
     }
 
-    // 5. Update Global State
-    // Restock Products
     const updatedProducts = currentData.products.map(p => {
       const returning = returnRecord.items.find(ri => ri.productId === p.id);
       return returning ? { ...p, stock: p.stock + returning.quantity } : p;
     });
 
-    // Update the Sale in the history
     const updatedSales = [...currentData.sales];
     updatedSales[saleIndex] = {
       ...originalSale,
@@ -153,7 +139,7 @@ export const TwinXOps = {
     const log = createLog(
       'RETURN_PROCESSED', 
       'return', 
-      `Return for INV #${originalSale.id.split('-')[0]}. Total Val: ${totalCalculatedRefund.toFixed(2)}. Cash Paid: ${refundRemaining.toFixed(2)}. Debt Reduced: ${(originalSale.remainingAmount - newRemainingAmount).toFixed(2)}.`
+      `Return for INV #${originalSale.id.split('-')[0]}. Total Val: ${totalCalculatedRefund.toFixed(2)}.`
     );
 
     return {
@@ -186,7 +172,7 @@ export const TwinXOps = {
     const log = createLog(
       isPurchase ? 'WHOLESALE_PURCHASE' : 'WHOLESALE_SALE',
       'wholesale',
-      `Wholesale ${transaction.type} TX #${transaction.id.split('-')[0]} for ${transaction.total}.`
+      `Wholesale ${transaction.type} TX #${transaction.id.split('-')[0]}.`
     );
 
     return {
@@ -207,10 +193,10 @@ export const TwinXOps = {
   },
 
   /**
-   * HR Logic: Adds an employee to the system.
+   * Unified Staff Management.
    */
   addEmployee: (currentData: AppData, employee: Employee): AppData => {
-    const log = createLog('EMPLOYEE_ADDED', 'hr', `Registered employee: ${employee.name} (${employee.role})`);
+    const log = createLog('STAFF_ADDED', 'hr', `Registered ${employee.role}: ${employee.name}`);
     return {
       ...currentData,
       employees: [...(currentData.employees || []), employee],
@@ -219,27 +205,110 @@ export const TwinXOps = {
   },
 
   /**
-   * HR Logic: Records attendance for an employee.
+   * SIMPLE ATTENDANCE LOGGER
+   * Added to fix missing method error in EmployeesScreen
    */
-  recordAttendance: (currentData: AppData, attendance: Attendance): AppData => {
-    const employee = currentData.employees.find(e => e.id === attendance.employeeId);
-    const log = createLog('ATTENDANCE_LOGGED', 'hr', `Attendance for ${employee?.name || 'Unknown'}: ${attendance.status}`);
+  recordAttendance: (currentData: AppData, record: Attendance): AppData => {
+    const employee = currentData.employees.find(e => e.id === record.employeeId);
+    const log = createLog('ATTENDANCE_RECORDED', 'hr', `${employee?.name || 'Staff'} marked as ${record.status}`);
     return {
       ...currentData,
-      attendance: [...(currentData.attendance || []), attendance],
+      attendance: [...(currentData.attendance || []), record],
       logs: [log, ...currentData.logs].slice(0, 5000)
     };
   },
 
   /**
-   * HR Logic: Processes a salary/bonus/advance payment.
-   * Linked to expenses to maintain "Financial Truth" in Net Cash.
+   * ADVANCED HR LOGIC: recordAttendanceAction
+   * Handles state machine for Check-In, Check-Out, and Breaks.
+   */
+  recordAttendanceAction: (
+    currentData: AppData, 
+    employeeId: string, 
+    action: 'check_in' | 'check_out' | 'break_start' | 'break_end'
+  ): AppData => {
+    const today = getTodayString();
+    const now = Date.now();
+    
+    const attendanceRecords = currentData.attendance || [];
+    const todayRecordIndex = attendanceRecords.findIndex(r => r.employeeId === employeeId && r.date === today);
+    const todayRecord = todayRecordIndex > -1 ? attendanceRecords[todayRecordIndex] : null;
+
+    let updatedRecords = [...attendanceRecords];
+
+    switch (action) {
+      case 'check_in':
+        if (todayRecord) throw new Error("Already checked in for today.");
+        const newRecord: Attendance = {
+          id: crypto.randomUUID(),
+          employeeId,
+          date: today,
+          timestamp: now,
+          checkIn: now,
+          breaks: [],
+          status: 'present'
+        };
+        updatedRecords.push(newRecord);
+        break;
+
+      case 'check_out':
+        if (!todayRecord) throw new Error("No check-in found for today.");
+        if (todayRecord.status === 'completed') throw new Error("Already checked out.");
+        if (todayRecord.status === 'on_break') throw new Error("End break before checking out.");
+        
+        updatedRecords[todayRecordIndex] = {
+          ...todayRecord,
+          checkOut: now,
+          status: 'completed'
+        };
+        break;
+
+      case 'break_start':
+        if (!todayRecord || todayRecord.status === 'completed') throw new Error("No active session found.");
+        if (todayRecord.status === 'on_break') throw new Error("Already on break.");
+
+        updatedRecords[todayRecordIndex] = {
+          ...todayRecord,
+          status: 'on_break',
+          breaks: [...todayRecord.breaks, { start: now }]
+        };
+        break;
+
+      case 'break_end':
+        if (!todayRecord || todayRecord.status !== 'on_break') throw new Error("Not currently on break.");
+
+        const lastBreakIndex = todayRecord.breaks.length - 1;
+        const updatedBreaks = [...todayRecord.breaks];
+        updatedBreaks[lastBreakIndex] = { ...updatedBreaks[lastBreakIndex], end: now };
+
+        updatedRecords[todayRecordIndex] = {
+          ...todayRecord,
+          status: 'present',
+          breaks: updatedBreaks
+        };
+        break;
+
+      default:
+        throw new Error("Invalid attendance action.");
+    }
+
+    const employee = currentData.employees.find(e => e.id === employeeId);
+    const log = createLog('ATTENDANCE_ACTION', 'hr', `${employee?.name || 'Staff'} performed ${action}`);
+
+    return {
+      ...currentData,
+      attendance: updatedRecords,
+      logs: [log, ...currentData.logs].slice(0, 5000)
+    };
+  },
+
+  /**
+   * Payroll Logic.
    */
   processSalaryTransaction: (currentData: AppData, transaction: SalaryTransaction): AppData => {
     const employee = currentData.employees.find(e => e.id === transaction.employeeId);
-    if (!employee) throw new Error("Employee not found for transaction.");
+    if (!employee) throw new Error("Employee not found.");
 
-    // Create a corresponding expense to impact net cash
     const salaryExpense: Expense = {
       id: crypto.randomUUID(),
       description: `Payroll: ${employee.name} (${transaction.type})`,
@@ -248,11 +317,7 @@ export const TwinXOps = {
       employeeId: employee.id
     };
 
-    const log = createLog(
-      'PAYROLL_PROCESSED',
-      'hr',
-      `${transaction.type.toUpperCase()} paid to ${employee.name}: ${transaction.amount}`
-    );
+    const log = createLog('PAYROLL', 'hr', `${transaction.type} paid to ${employee.name}: ${transaction.amount}`);
 
     return {
       ...currentData,
