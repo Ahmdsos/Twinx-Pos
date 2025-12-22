@@ -45,10 +45,12 @@ const App: React.FC = () => {
     return (localStorage.getItem('twinx_theme') as 'light' | 'dark') || 'dark';
   });
   
-  // Role State (Default to admin for full access, typically synced from login session)
+  // Role State (Default to admin for full access)
   const [userRole, setUserRole] = useState<Role>('admin');
 
-  const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+  // TWINX INTEGRITY: Track selected ID instead of object to ensure reactivity
+  const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
+  
   const [data, setData] = useState<AppData>({
     products: [],
     sales: [],
@@ -71,6 +73,12 @@ const App: React.FC = () => {
   });
 
   const t = translations[lang];
+
+  // Derive the active sale from the master ledger (Reactive)
+  const selectedSale = useMemo(() => 
+    data.sales.find(s => s.id === selectedSaleId) || null, 
+    [data.sales, selectedSaleId]
+  );
 
   useEffect(() => {
     localStorage.setItem('twinx_lang', lang);
@@ -156,9 +164,11 @@ const App: React.FC = () => {
   const cashBalance = data.initialCash + totalRetailSales + totalWholesaleReceived - totalExpenses - totalRefunds - totalWholesalePaidOut;
 
   const renderView = () => {
+    const setSaleId = (sale: Sale) => setSelectedSaleId(sale.id);
+
     switch (view) {
       case 'dashboard':
-        return <Dashboard data={data} lang={lang} setView={setView} onSelectSale={setSelectedSale} cashBalance={cashBalance} />;
+        return <Dashboard data={data} lang={lang} setView={setView} onSelectSale={setSaleId} cashBalance={cashBalance} />;
       case 'sales':
         return <SalesScreen data={data} updateData={updateData} addLog={addLog} lang={lang} />;
       case 'inventory':
@@ -168,7 +178,7 @@ const App: React.FC = () => {
       case 'returns':
         return <ReturnsScreen data={data} updateData={updateData} addLog={addLog} lang={lang} />;
       case 'reports':
-        return <ReportsScreen data={data} lang={lang} onSelectSale={setSelectedSale} />;
+        return <ReportsScreen data={data} lang={lang} onSelectSale={setSaleId} />;
       case 'intelligence':
         return <IntelligenceScreen data={data} lang={lang} />;
       case 'logs':
@@ -176,21 +186,19 @@ const App: React.FC = () => {
       case 'wholesale':
         return <WholesaleScreen data={data} updateData={updateData} addLog={addLog} lang={lang} />;
       case 'delivery':
-        return <DeliveryScreen data={data} updateData={updateData} addLog={addLog} lang={lang} onSelectSale={setSelectedSale} />;
+        return <DeliveryScreen data={data} updateData={updateData} addLog={addLog} lang={lang} onSelectSale={setSaleId} />;
       case 'customers':
-        return <CustomersScreen data={data} updateData={updateData} addLog={addLog} lang={lang} onSelectSale={setSelectedSale} />;
+        return <CustomersScreen data={data} updateData={updateData} addLog={addLog} lang={lang} onSelectSale={setSaleId} />;
       case 'hr':
         return <EmployeesScreen data={data} updateData={updateData} addLog={addLog} lang={lang} />;
       case 'settings':
         return <SettingsScreen data={data} updateData={updateData} setData={setData} addLog={addLog} lang={lang} />;
       default:
-        return <Dashboard data={data} lang={lang} setView={setView} onSelectSale={setSelectedSale} cashBalance={cashBalance} />;
+        return <Dashboard data={data} lang={lang} setView={setView} onSelectSale={setSaleId} cashBalance={cashBalance} />;
     }
   };
 
-  // Nav Items with Permission Gates
   const navItems = useMemo(() => {
-    // FIX: Using explicit typing instead of 'as const' to avoid narrowed tuple type errors with '.includes()'
     interface NavItem {
       id: string;
       label: string;
@@ -218,7 +226,6 @@ const App: React.FC = () => {
 
   return (
     <div className={`flex min-h-screen bg-zinc-950 light:bg-zinc-50 text-zinc-100 light:text-zinc-900 overflow-hidden transition-all duration-500`}>
-      {/* FIXED SIDEBAR */}
       <aside className={`fixed top-0 bottom-0 ${lang === 'ar' ? 'right-0' : 'left-0'} w-64 border-zinc-800 light:border-zinc-200 bg-black light:bg-white flex flex-col border-e shrink-0 transition-all duration-500 z-50`}>
         <div className="p-6 border-b border-zinc-800 light:border-zinc-200">
           <h1 className="text-2xl font-bold tracking-tighter flex items-center gap-2">
@@ -272,18 +279,9 @@ const App: React.FC = () => {
             </div>
             <span className="text-[10px] font-black text-red-500">{lang === 'ar' ? t.switch_to_en : t.switch_to_ar}</span>
           </button>
-
-          <div className="bg-zinc-900/50 light:bg-zinc-100 rounded-xl p-4 border border-zinc-800/50 light:border-zinc-200/50">
-            <div className="flex items-center justify-between text-[9px] text-zinc-600 light:text-zinc-400 mb-2 uppercase tracking-widest font-black">
-              <span>{t.local_only}</span>
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-sm shadow-green-900/50"></span>
-            </div>
-            <p className="text-[8px] text-zinc-700 light:text-zinc-300 uppercase font-black">TwinX Engine v1.5.2-stable</p>
-          </div>
         </div>
       </aside>
 
-      {/* MAIN CONTENT AREA */}
       <main className={`flex-1 flex flex-col ${lang === 'ar' ? 'mr-64' : 'ml-64'} transition-all duration-500 min-h-screen overflow-hidden`}>
         <header className="h-16 border-b border-zinc-800 light:border-zinc-200 flex items-center justify-between px-8 bg-zinc-950 light:bg-white z-40 shrink-0 transition-all duration-500 shadow-sm">
           <div className="flex items-center gap-4">
@@ -304,25 +302,24 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      {/* OVERLAYS */}
+      {/* REACTIVE MODAL: Always looks up sale by ID to prevent staleness */}
       {selectedSale && (
         <SaleDetailsModal 
           sale={selectedSale} 
           lang={lang} 
           currency={data.currency || 'EGP'}
           customers={data.customers}
-          onClose={() => setSelectedSale(null)} 
+          onClose={() => setSelectedSaleId(null)} 
           onUpdate={(updatedSale) => {
             const updatedSales = data.sales.map(s => s.id === updatedSale.id ? updatedSale : s);
             updateData({ sales: updatedSales });
             addLog({ action: 'SALE_EDITED', category: 'sale', details: `Edited invoice ${updatedSale.id.split('-')[0]}` });
-            setSelectedSale(null);
           }}
           onDelete={(id) => {
             if (confirm(lang === 'ar' ? 'هل أنت متأكد من حذف هذه الفاتورة؟ لن يتم استرجاع المخزون تلقائياً.' : 'Delete invoice? Stock will not be automatically restored.')) {
               updateData({ sales: data.sales.filter(s => s.id !== id) });
               addLog({ action: 'SALE_DELETED', category: 'sale', details: `Deleted invoice ${id.split('-')[0]}` });
-              setSelectedSale(null);
+              setSelectedSaleId(null);
             }
           }}
         />

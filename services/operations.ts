@@ -37,7 +37,7 @@ export const TwinXOps = {
   /**
    * Processes a retail sale atomically.
    * PROTOCOL: Snapshot -> Mutate (Stock, Customer, Sale, Logs) -> Return New State.
-   * TWINX INTEGRITY: Loyalty points are strictly 1:1 (1 Unit spent = 1 Point).
+   * TWINX INTEGRITY: Loyalty points are strictly 1:1 (1 Unit spent on PRODUCTS = 1 Point).
    */
   processRetailSale: (currentData: AppData, saleData: Partial<Sale>): AppData => {
     const newData: AppData = JSON.parse(JSON.stringify(currentData));
@@ -62,14 +62,15 @@ export const TwinXOps = {
       newData.products[pIndex].stock -= item.quantity;
     }
 
+    // FINANCIAL PRECISION: Separate Product Revenue from Delivery Fees
     const productRevenue = subtotal - discount;
     const total = productRevenue + deliveryIncome;
     const paid = saleData.paidAmount ?? total;
     const remaining = Math.max(0, total - paid);
     const totalProfit = (productRevenue - totalCost) + deliveryIncome;
     
-    // TWINX INTEGRITY: Loyalty Point Logic (Enforced 1:1)
-    const pointsEarned = Math.floor(total);
+    // TWINX INTEGRITY FIX: Loyalty Points only on Product Spend (Exclude Delivery)
+    const pointsEarned = Math.max(0, Math.floor(productRevenue));
 
     const finalSale: Sale = {
       id: saleData.id || crypto.randomUUID(),
@@ -111,7 +112,7 @@ export const TwinXOps = {
     // 3. Commit Sale and Log
     newData.sales = [finalSale, ...newData.sales];
     newData.logs = [
-      createLog('SALE_COMPLETED', 'sale', `INV #${finalSale.id.split('-')[0]} for ${total}. Points: +${pointsEarned}`),
+      createLog('SALE_COMPLETED', 'sale', `INV #${finalSale.id.split('-')[0]} for ${total}. Loyalty Earned: +${pointsEarned} (Product Rev Only)`),
       ...newData.logs
     ].slice(0, 5000);
 
@@ -241,7 +242,7 @@ export const TwinXOps = {
     originalSale.totalCost = Math.max(0, originalSale.totalCost - totalReturnedCost);
     originalSale.totalProfit = Math.max(0, originalSale.totalProfit - (totalCalculatedRefund - totalReturnedCost));
 
-    // 5. Loyalty Reversal
+    // 5. Loyalty Reversal (Based on product refund amount)
     if (originalSale.customerId) {
       const cIndex = newData.customers.findIndex(c => c.id === originalSale.customerId);
       if (cIndex >= 0) {

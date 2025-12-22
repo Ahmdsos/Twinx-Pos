@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { AppData, Employee, Sale, LogEntry } from '../types';
 import { translations, Language } from '../translations';
@@ -34,6 +35,7 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
   const t = translations[lang];
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState<string | null>(null);
 
   // Unified Driver Source: Filter from HR
   const deliveryStaff = useMemo(() => {
@@ -66,16 +68,23 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
     }, { totalCash: 0, totalFees: 0, count: 0 });
   }, [driverOrders]);
 
+  // TWINX COMMAND: Commit status change to Global Ledger
   const handleUpdateStatus = (saleId: string, status: 'delivered' | 'cancelled' | 'pending') => {
+    setIsProcessing(saleId);
     try {
+      // Snapshot -> Mutate -> Commit
       const updatedData = TwinXOps.updateDeliveryStatus(data, saleId, status);
       updateData(updatedData);
-      // Status log is created inside TwinXOps
+      
+      // Clear visual lock after state cycles
+      setTimeout(() => setIsProcessing(null), 300);
     } catch (err: any) {
       alert(err.message);
+      setIsProcessing(null);
     }
   };
 
+  // TWINX COMMAND: Clone transaction as fresh entry
   const handleReOrder = (saleId: string) => {
     if (confirm(lang === 'ar' ? 'هل تريد تكرار هذا الأوردر كطلب جديد؟' : 'Duplicate this as a new order?')) {
       try {
@@ -184,7 +193,7 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
              </div>
            ) : (
              <div className="flex-1 flex flex-col animate-in fade-in duration-300 overflow-hidden">
-               {/* Header Card */}
+               {/* Driver Stats View */}
                <div className="p-8 border-b border-zinc-800 light:border-zinc-200 bg-black/20 light:bg-white flex justify-between items-center shrink-0">
                   <div className="flex items-center gap-6">
                     <div className="w-20 h-20 rounded-3xl bg-red-600 text-white flex items-center justify-center text-4xl font-black shadow-2xl shadow-red-900/20">{selectedDriver.name.charAt(0)}</div>
@@ -198,7 +207,7 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
                   </div>
                </div>
 
-               {/* Metrics Grid */}
+               {/* Snapshot Metrics */}
                <div className="p-8 grid grid-cols-1 md:grid-cols-3 gap-6 shrink-0 bg-black/10 light:bg-zinc-100/50 border-b border-zinc-800/50 light:border-zinc-200">
                   <div className="p-6 bg-zinc-950 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-[32px] shadow-sm">
                     <p className="text-[10px] font-black uppercase text-zinc-500 mb-1">{t.orders_assigned}</p>
@@ -214,7 +223,7 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
                   </div>
                </div>
 
-               {/* Assigned Orders List */}
+               {/* Live Order Tracking List */}
                <div className="flex-1 overflow-y-auto p-8 space-y-6 scrollbar-thin">
                  <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-zinc-500">
@@ -226,9 +235,10 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
                    {driverOrders.map(sale => (
                      <div key={sale.id} className={`bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 p-6 rounded-[32px] flex flex-col gap-6 hover:scale-[1.01] transition-all shadow-lg group relative overflow-hidden ${getCardBorderStyle(sale.status)} ${sale.status === 'cancelled' ? 'opacity-60 grayscale' : ''}`}>
                         
-                        {/* Status Overlay for Cancelled */}
-                        {sale.status === 'cancelled' && (
-                          <div className="absolute top-4 right-4 rotate-12 px-3 py-1 bg-red-600 text-white font-black text-[10px] uppercase rounded shadow-lg z-10">{lang === 'ar' ? 'ملغي' : 'Cancelled'}</div>
+                        {isProcessing === sale.id && (
+                          <div className="absolute inset-0 z-20 bg-black/60 backdrop-blur-sm flex items-center justify-center animate-in fade-in">
+                            <RefreshCw className="text-white animate-spin" size={32}/>
+                          </div>
                         )}
 
                         <div className="flex justify-between items-start">
@@ -262,14 +272,12 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
                                 <>
                                   <button 
                                     onClick={() => handleUpdateStatus(sale.id, 'delivered')}
-                                    title={lang === 'ar' ? 'تأكيد التسليم' : 'Mark Delivered'}
                                     className="w-12 h-12 rounded-2xl bg-green-500/10 text-green-500 border border-green-500/20 flex items-center justify-center hover:bg-green-600 hover:text-white transition-all shadow-lg"
                                   >
                                     <CheckCircle2 size={22}/>
                                   </button>
                                   <button 
                                     onClick={() => handleUpdateStatus(sale.id, 'cancelled')}
-                                    title={lang === 'ar' ? 'إلغاء الطلب / مرتجع' : 'Cancel / Return'}
                                     className="w-12 h-12 rounded-2xl bg-red-500/10 text-red-500 border border-red-500/20 flex items-center justify-center hover:bg-red-600 hover:text-white transition-all shadow-lg"
                                   >
                                     <XCircle size={22}/>
