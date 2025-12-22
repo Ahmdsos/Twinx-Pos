@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   LayoutDashboard, 
@@ -44,6 +45,7 @@ const App: React.FC = () => {
     return (localStorage.getItem('twinx_theme') as 'light' | 'dark') || 'dark';
   });
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+  // Fix: Added categories and stockLogs to satisfy AppData interface
   const [data, setData] = useState<AppData>({
     products: [],
     sales: [],
@@ -58,6 +60,8 @@ const App: React.FC = () => {
     employees: [],
     attendance: [],
     salaryTransactions: [],
+    categories: [],
+    stockLogs: [],
     initialCash: 0,
     draftExpiryMinutes: 120,
     currency: 'EGP',
@@ -88,7 +92,8 @@ const App: React.FC = () => {
       (d: DraftInvoice) => now - d.timestamp < expiryMs
     );
 
-    const cleanedData = {
+    // Fix: Added categories and stockLogs to cleanedData to satisfy AppData interface
+    const cleanedData: AppData = {
       ...loadedData,
       returns: loadedData.returns || [],
       drafts: activeDrafts,
@@ -100,6 +105,8 @@ const App: React.FC = () => {
       employees: loadedData.employees || [],
       attendance: loadedData.attendance || [],
       salaryTransactions: loadedData.salaryTransactions || [],
+      categories: loadedData.categories || [],
+      stockLogs: loadedData.stockLogs || [],
       currency: loadedData.currency || 'EGP'
     };
 

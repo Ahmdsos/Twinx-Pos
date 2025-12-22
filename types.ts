@@ -7,8 +7,13 @@ export interface Product {
   costPrice: number;
   stock: number;
   minStock: number;
+  minStockLevel?: number; // Custom alert threshold
+  supplier?: string;
   imagePath?: string;
   isSystemGenerated?: boolean;
+  expiryDate?: string;     // Pro: Expiry tracking
+  brand?: string;          // Pro: Brand filtering
+  aisleLocation?: string;  // Pro: Warehouse mapping
 }
 
 export interface CartItem extends Product {
@@ -33,6 +38,8 @@ export interface Customer {
   invoiceCount: number;
   channelsUsed: SaleChannel[];
   lastOrderTimestamp?: number;
+  totalPoints: number; // Loyalty points
+  lastVisit?: number;
 }
 
 export type Role = 'admin' | 'cashier' | 'delivery';
@@ -43,24 +50,23 @@ export interface Employee {
   phone: string;
   role: Role;
   baseSalary: number;
-  joinDate: string; // Changed to string per requirements
+  joinDate: string;
   isActive: boolean;
   notes?: string;
-  vehicleId?: string; // Maintained for role === 'delivery'
+  vehicleId?: string;
 }
 
-// Added Driver type alias to fix import errors in DeliveryScreen
 export type Driver = Employee;
 
 export interface Attendance {
   id: string;
   employeeId: string;
-  date: string; // YYYY-MM-DD for uniqueness
-  timestamp: number; // Added for UI filtering
+  date: string;
+  timestamp: number;
   checkIn?: number;
   checkOut?: number;
   breaks: { start: number; end?: number }[];
-  status: 'present' | 'on_break' | 'completed' | 'late' | 'absent'; // Added late and absent
+  status: 'present' | 'on_break' | 'completed' | 'late' | 'absent';
 }
 
 export interface SalaryTransaction {
@@ -70,6 +76,16 @@ export interface SalaryTransaction {
   type: 'salary' | 'advance' | 'bonus';
   timestamp: number;
   notes?: string;
+}
+
+export interface StockLog {
+  id: string;
+  productId: string;
+  oldStock: number;
+  newStock: number;
+  reason: string;
+  timestamp: number;
+  employeeId: string;
 }
 
 export type SaleChannel = 'store' | 'social_media' | 'website';
@@ -90,7 +106,10 @@ export interface Sale {
   isDelivery?: boolean;
   deliveryDetails?: DeliveryDetails;
   deliveryFee?: number;
-  driverId?: string; // This links to an Employee with role 'delivery'
+  driverId?: string;
+  totalCost: number; // Financial Pro
+  totalProfit: number; // Financial Pro
+  pointsEarned: number; // Loyalty Pro
 }
 
 export interface DraftInvoice {
@@ -177,11 +196,13 @@ export interface AppData {
   logs: LogEntry[];
   partners: WholesalePartner[];
   wholesaleTransactions: WholesaleTransaction[];
-  drivers: Employee[]; // Added to fix missing property errors
-  customers: Customer[]; // Added to fix missing property errors
-  employees: Employee[]; // Unified Staff
+  drivers: Employee[];
+  customers: Customer[];
+  employees: Employee[];
   attendance: Attendance[];
   salaryTransactions: SalaryTransaction[];
+  categories: string[];
+  stockLogs: StockLog[];
   initialCash: number;
   draftExpiryMinutes: number;
   lastBackupTimestamp?: number;

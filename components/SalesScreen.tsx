@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { AppData, Product, Sale, CartItem, LogEntry, Customer, SaleChannel, WholesalePartner, WholesaleTransaction, Employee } from '../types';
 import { translations, Language } from '../translations';
@@ -265,11 +266,26 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
     let updatedCustomers = [...data.customers];
     let linkedCustomerId: string | undefined = undefined;
 
+    // Fix: Added calculation for cost, profit and loyalty points for new sale record
+    const pointsEarned = Math.floor(total / 10);
+    const totalCost = cart.reduce((acc, item) => acc + (item.costPrice * item.quantity), 0);
+    const totalProfit = total - totalCost;
+
     if (customerDetails.phone) {
-      const existing = data.customers.find(c => c.phone === customerDetails.phone);
-      if (existing) {
+      const existingIndex = data.customers.findIndex(c => c.phone === customerDetails.phone);
+      if (existingIndex > -1) {
+        const existing = data.customers[existingIndex];
         linkedCustomerId = existing.id;
+        // Fix: Update existing customer stats for state integrity
+        updatedCustomers[existingIndex] = {
+          ...existing,
+          totalPurchases: existing.totalPurchases + total,
+          invoiceCount: existing.invoiceCount + 1,
+          totalPoints: (existing.totalPoints || 0) + pointsEarned,
+          lastOrderTimestamp: Date.now()
+        };
       } else {
+        // Fix: Added missing totalPoints property to new Customer object
         const newCustomer: Customer = {
           id: crypto.randomUUID(),
           name: customerDetails.name || (lang === 'ar' ? 'عميل جديد' : 'New Customer'),
@@ -278,6 +294,7 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
           totalPurchases: total,
           invoiceCount: 1,
           channelsUsed: [saleChannel],
+          totalPoints: pointsEarned,
           lastOrderTimestamp: Date.now()
         };
         updatedCustomers.push(newCustomer);
@@ -285,10 +302,11 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
       }
     }
 
+    // Fix: Added missing financial properties (totalCost, totalProfit, pointsEarned) to Sale object
     const newSale: Sale = {
       id: crypto.randomUUID(),
       timestamp: Date.now(),
-      items: [...cart],
+      items: cart.map(i => ({ ...i, returnedQuantity: 0 })),
       subtotal,
       totalDiscount: calculatedDiscountAmount,
       discountType: discountType,
@@ -305,7 +323,10 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
         deliveryAddress: customerDetails.address
       } : undefined,
       deliveryFee: isDelivery ? deliveryFee : undefined,
-      driverId: isDelivery ? selectedDriverId : undefined
+      driverId: isDelivery ? selectedDriverId : undefined,
+      totalCost,
+      totalProfit,
+      pointsEarned
     };
 
     const updatedProducts = data.products.map(p => {

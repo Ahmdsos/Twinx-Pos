@@ -1,4 +1,4 @@
-import { AppData, Sale, WholesaleTransaction, SaleReturn, Expense, LogEntry, Product, Customer, Employee, Attendance, SalaryTransaction } from '../types';
+import { AppData, Sale, WholesaleTransaction, SaleReturn, Expense, LogEntry, Product, Customer, Employee, Attendance, SalaryTransaction, StockLog } from '../types';
 
 /**
  * TwinX Operations Service
@@ -29,12 +29,20 @@ export const TwinXOps = {
     const paid = saleData.paidAmount ?? total;
     const remaining = Math.max(0, total - paid);
 
+    // Pro Feature: Cost & Profit Calculation
+    let totalCost = 0;
     for (const item of items) {
       const p = currentData.products.find(prod => prod.id === item.id);
       if (!p || p.stock < item.quantity) {
         throw new Error(`Insufficient stock: ${item.name}`);
       }
+      totalCost += (p.costPrice * item.quantity);
     }
+
+    const totalProfit = total - totalCost;
+    
+    // Loyalty Logic Update: 1 Currency Unit = 1 Point
+    const pointsEarned = Math.floor(total); 
 
     const updatedProducts = currentData.products.map(p => {
       const sold = items.find(i => i.id === p.id);
@@ -55,7 +63,10 @@ export const TwinXOps = {
       isDelivery: saleData.isDelivery,
       deliveryDetails: saleData.deliveryDetails,
       deliveryFee: saleData.deliveryFee,
-      driverId: saleData.driverId
+      driverId: saleData.driverId,
+      totalCost,
+      totalProfit,
+      pointsEarned
     };
 
     const updatedCustomers = currentData.customers.map(c => {
@@ -65,13 +76,15 @@ export const TwinXOps = {
           totalPurchases: c.totalPurchases + total,
           invoiceCount: c.invoiceCount + 1,
           lastOrderTimestamp: finalSale.timestamp,
-          channelsUsed: Array.from(new Set([...c.channelsUsed, finalSale.saleChannel]))
+          channelsUsed: Array.from(new Set([...c.channelsUsed, finalSale.saleChannel])),
+          totalPoints: (c.totalPoints || 0) + pointsEarned,
+          lastVisit: finalSale.timestamp
         };
       }
       return c;
     });
 
-    const log = createLog('SALE_COMPLETED', 'sale', `Retail Sale #${finalSale.id.split('-')[0]} for ${total}. Paid: ${paid}.`);
+    const log = createLog('SALE_COMPLETED', 'sale', `Retail Sale #${finalSale.id.split('-')[0]} for ${total}. Profit: ${totalProfit.toFixed(2)}. Points Earned: ${pointsEarned}.`);
 
     return {
       ...currentData,
@@ -93,6 +106,7 @@ export const TwinXOps = {
     const discountRatio = originalSale.subtotal > 0 ? (originalSale.total / originalSale.subtotal) : 1;
     
     let totalCalculatedRefund = 0;
+    let totalReturnedCost = 0;
     const updatedSaleItems = [...originalSale.items];
 
     for (const returnItem of returnRecord.items) {
@@ -113,6 +127,12 @@ export const TwinXOps = {
 
       const itemRefundValue = (item.price * returnItem.quantity) * discountRatio;
       totalCalculatedRefund += itemRefundValue;
+      
+      // Pro: Track returned cost for profit adjustment
+      const product = currentData.products.find(p => p.id === returnItem.productId);
+      if (product) {
+        totalReturnedCost += (product.costPrice * returnItem.quantity);
+      }
     }
 
     let refundRemaining = totalCalculatedRefund;
@@ -129,23 +149,37 @@ export const TwinXOps = {
       return returning ? { ...p, stock: p.stock + returning.quantity } : p;
     });
 
+    // Loyalty Deduction Logic: 1 Unit Refunded = 1 Point Deducted
+    const pointsToDeduct = Math.floor(totalCalculatedRefund);
+    const updatedCustomers = currentData.customers.map(c => {
+      if (c.id === originalSale.customerId) {
+        return {
+          ...c,
+          totalPoints: Math.max(0, (c.totalPoints || 0) - pointsToDeduct)
+        };
+      }
+      return c;
+    });
+
     const updatedSales = [...currentData.sales];
     updatedSales[saleIndex] = {
       ...originalSale,
       items: updatedSaleItems,
-      remainingAmount: newRemainingAmount
+      remainingAmount: newRemainingAmount,
+      totalProfit: originalSale.totalProfit - (totalCalculatedRefund - totalReturnedCost)
     };
 
     const log = createLog(
       'RETURN_PROCESSED', 
       'return', 
-      `Return for INV #${originalSale.id.split('-')[0]}. Total Val: ${totalCalculatedRefund.toFixed(2)}.`
+      `Return for INV #${originalSale.id.split('-')[0]}. Refund: ${totalCalculatedRefund.toFixed(2)}. Points Reversed: ${pointsToDeduct}.`
     );
 
     return {
       ...currentData,
       products: updatedProducts,
       sales: updatedSales,
+      customers: updatedCustomers,
       returns: [
         { ...returnRecord, totalRefund: totalCalculatedRefund }, 
         ...currentData.returns
@@ -206,7 +240,6 @@ export const TwinXOps = {
 
   /**
    * SIMPLE ATTENDANCE LOGGER
-   * Added to fix missing method error in EmployeesScreen
    */
   recordAttendance: (currentData: AppData, record: Attendance): AppData => {
     const employee = currentData.employees.find(e => e.id === record.employeeId);
@@ -230,7 +263,7 @@ export const TwinXOps = {
     const today = getTodayString();
     const now = Date.now();
     
-    const attendanceRecords = currentData.attendance || [];
+    const attendanceRecords = (currentData.attendance || []);
     const todayRecordIndex = attendanceRecords.findIndex(r => r.employeeId === employeeId && r.date === today);
     const todayRecord = todayRecordIndex > -1 ? attendanceRecords[todayRecordIndex] : null;
 
@@ -323,6 +356,90 @@ export const TwinXOps = {
       ...currentData,
       salaryTransactions: [...(currentData.salaryTransactions || []), transaction],
       expenses: [...(currentData.expenses || []), salaryExpense],
+      logs: [log, ...currentData.logs].slice(0, 5000)
+    };
+  },
+
+  /**
+   * INVENTORY: CATEGORY MANAGEMENT
+   */
+  addCategory: (currentData: AppData, categoryName: string): AppData => {
+    const categories = (currentData.categories || []);
+    if (categories.includes(categoryName)) return currentData;
+    
+    const log = createLog('CATEGORY_ADDED', 'inventory', `New category: ${categoryName}`);
+    return {
+      ...currentData,
+      categories: [...categories, categoryName],
+      logs: [log, ...currentData.logs].slice(0, 5000)
+    };
+  },
+
+  deleteCategory: (currentData: AppData, categoryName: string): AppData => {
+    const log = createLog('CATEGORY_REMOVED', 'inventory', `Category deleted: ${categoryName}`);
+    return {
+      ...currentData,
+      categories: (currentData.categories || []).filter(c => c !== categoryName),
+      logs: [log, ...currentData.logs].slice(0, 5000)
+    };
+  },
+
+  /**
+   * INVENTORY: STOCK ADJUSTMENTS (STOCKTAKING)
+   */
+  adjustStock: (currentData: AppData, productId: string, newQuantity: number, reason: string, employeeId: string): AppData => {
+    const products = [...currentData.products];
+    const productIndex = products.findIndex(p => p.id === productId);
+    if (productIndex === -1) throw new Error("Product not found");
+
+    const product = products[productIndex];
+    const oldStock = product.stock;
+    const diff = oldStock - newQuantity;
+
+    // Mutate Product
+    products[productIndex] = { ...product, stock: newQuantity };
+
+    // Create Stock Log
+    const stockLog: StockLog = {
+      id: crypto.randomUUID(),
+      productId,
+      oldStock,
+      newStock: newQuantity,
+      reason,
+      timestamp: Date.now(),
+      employeeId
+    };
+
+    let updatedExpenses = [...(currentData.expenses || [])];
+    
+    // Automatic Expense Generation for Losses
+    if (diff > 0) {
+      const lossValue = diff * product.costPrice;
+      const lossExpense: Expense = {
+        id: crypto.randomUUID(),
+        description: `Inventory Loss: ${product.name} (${reason})`,
+        amount: lossValue,
+        timestamp: Date.now(),
+      };
+      updatedExpenses = [lossExpense, ...updatedExpenses];
+    }
+
+    const log = createLog('STOCK_ADJUSTED', 'inventory', `Stock for ${product.name} adjusted from ${oldStock} to ${newQuantity}. Reason: ${reason}`);
+
+    return {
+      ...currentData,
+      products,
+      stockLogs: [stockLog, ...(currentData.stockLogs || [])],
+      expenses: updatedExpenses,
+      logs: [log, ...currentData.logs].slice(0, 5000)
+    };
+  },
+
+  addProduct: (currentData: AppData, product: Product): AppData => {
+    const log = createLog('PRODUCT_ADDED', 'inventory', `Product added: ${product.name} (${product.barcode || 'No Barcode'})`);
+    return {
+      ...currentData,
+      products: [...currentData.products, product],
       logs: [log, ...currentData.logs].slice(0, 5000)
     };
   }

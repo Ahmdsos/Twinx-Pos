@@ -10,6 +10,7 @@ export const storageService = {
       try {
         const parsed = JSON.parse(saved);
         // Ensure all AppData fields are present after parsing including new HR modules
+        // Fix: Added categories and stockLogs to satisfy AppData interface
         return {
           products: parsed.products || [],
           sales: parsed.sales || [],
@@ -21,19 +22,22 @@ export const storageService = {
           wholesaleTransactions: parsed.wholesaleTransactions || [],
           drivers: parsed.drivers || [],
           customers: parsed.customers || [],
-          // Fix: Ensure HR properties are initialized from storage or defaults
           employees: parsed.employees || [],
           attendance: parsed.attendance || [],
           salaryTransactions: parsed.salaryTransactions || [],
+          categories: parsed.categories || [],
+          stockLogs: parsed.stockLogs || [],
           initialCash: parsed.initialCash || 0,
           draftExpiryMinutes: parsed.draftExpiryMinutes || 120,
-          lastBackupTimestamp: parsed.lastBackupTimestamp
+          lastBackupTimestamp: parsed.lastBackupTimestamp,
+          currency: parsed.currency || 'EGP'
         };
       } catch (e) {
         console.error("Failed to parse storage data", e);
       }
     }
     // Default initial data structure
+    // Fix: Added categories and stockLogs to default state
     return {
       products: [],
       sales: [],
@@ -45,12 +49,14 @@ export const storageService = {
       wholesaleTransactions: [],
       drivers: [],
       customers: [],
-      // Fix: Ensure HR properties are initialized for fresh installations
       employees: [],
       attendance: [],
       salaryTransactions: [],
+      categories: [],
+      stockLogs: [],
       initialCash: 0,
       draftExpiryMinutes: 120,
+      currency: 'EGP'
     };
   },
 
@@ -93,6 +99,8 @@ export const storageService = {
             if (!data.employees) data.employees = [];
             if (!data.attendance) data.attendance = [];
             if (!data.salaryTransactions) data.salaryTransactions = [];
+            if (!data.categories) data.categories = [];
+            if (!data.stockLogs) data.stockLogs = [];
             resolve(data);
           } else {
             console.error("Invalid ledger format: Missing required fields.");
