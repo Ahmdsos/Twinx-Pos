@@ -86,59 +86,84 @@ export const TwinXOps = {
   },
 
   /**
-   * Processes a return with strict quantity validation and debt-first refunding.
+   * Robust Return Processor (TwinX Integrity Protocol)
+   * Handles proportional discounts, debt reduction, and atomic quantity tracking.
    */
   processReturn: (currentData: AppData, returnRecord: SaleReturn): AppData => {
-    const originalSale = currentData.sales.find(s => s.id === returnRecord.saleId);
-    if (!originalSale) throw new Error("Original sale not found.");
+    // 1. Find and Clone Original Sale for mutation
+    const saleIndex = currentData.sales.findIndex(s => s.id === returnRecord.saleId);
+    if (saleIndex === -1) throw new Error("Original sale record not found.");
+    const originalSale = { ...currentData.sales[saleIndex] };
 
-    // 1. Validate Quantities against original items
-    const updatedSaleItems = originalSale.items.map(item => {
-      const returning = returnRecord.items.find(ri => ri.productId === item.id);
-      if (returning) {
-        const currentReturned = item.returnedQuantity || 0;
-        if (currentReturned + returning.quantity > item.quantity) {
-          throw new Error(`Quantity exceeds original sale for: ${item.name}`);
-        }
-        return { ...item, returnedQuantity: currentReturned + returning.quantity };
+    // 2. Calculate Effective Price (The Golden Ratio)
+    // Ensures we refund exactly what was paid proportionally after global discounts/delivery.
+    const discountRatio = originalSale.subtotal > 0 ? (originalSale.total / originalSale.subtotal) : 1;
+    
+    let totalCalculatedRefund = 0;
+    const updatedSaleItems = [...originalSale.items];
+
+    // 3. Validate and Update Quantities
+    for (const returnItem of returnRecord.items) {
+      const itemIndex = updatedSaleItems.findIndex(i => i.id === returnItem.productId);
+      if (itemIndex === -1) throw new Error(`Product ${returnItem.productId} not found in original sale.`);
+      
+      const item = updatedSaleItems[itemIndex];
+      const currentReturned = item.returnedQuantity || 0;
+      
+      if (currentReturned + returnItem.quantity > item.quantity) {
+        throw new Error(`Integrity Violation: Cannot return ${returnItem.quantity} units of ${item.name}. Already returned: ${currentReturned}/${item.quantity}`);
       }
-      return item;
-    });
 
-    // 2. Adjust Debt vs Cash Refund
-    let refundRemaining = returnRecord.totalRefund;
-    let updatedRemainingAmount = originalSale.remainingAmount;
+      // Update the sale record's returned quantity (Atomic lock)
+      updatedSaleItems[itemIndex] = {
+        ...item,
+        returnedQuantity: currentReturned + returnItem.quantity
+      };
 
-    if (updatedRemainingAmount > 0) {
-      const debtDeduction = Math.min(updatedRemainingAmount, refundRemaining);
-      updatedRemainingAmount -= debtDeduction;
+      // Calculate proportional refund for this specific item
+      const itemRefundValue = (item.price * returnItem.quantity) * discountRatio;
+      totalCalculatedRefund += itemRefundValue;
+    }
+
+    // 4. Financial Truth: Debt vs Cash Settlement
+    let refundRemaining = totalCalculatedRefund;
+    let newRemainingAmount = originalSale.remainingAmount;
+
+    if (newRemainingAmount > 0) {
+      const debtDeduction = Math.min(newRemainingAmount, refundRemaining);
+      newRemainingAmount -= debtDeduction;
       refundRemaining -= debtDeduction;
     }
 
-    // 3. Update Global Products (Restock)
+    // 5. Update Global State
+    // Restock Products
     const updatedProducts = currentData.products.map(p => {
-      const returned = returnRecord.items.find(ri => ri.productId === p.id);
-      return returned ? { ...p, stock: p.stock + returned.quantity } : p;
+      const returning = returnRecord.items.find(ri => ri.productId === p.id);
+      return returning ? { ...p, stock: p.stock + returning.quantity } : p;
     });
 
-    // 4. Update Sales List with modified item returnedQuantities and remainingAmount
-    const updatedSales = currentData.sales.map(s => 
-      s.id === returnRecord.saleId 
-        ? { ...s, items: updatedSaleItems, remainingAmount: updatedRemainingAmount } 
-        : s
-    );
+    // Update the Sale in the history
+    const updatedSales = [...currentData.sales];
+    updatedSales[saleIndex] = {
+      ...originalSale,
+      items: updatedSaleItems,
+      remainingAmount: newRemainingAmount
+    };
 
     const log = createLog(
       'RETURN_PROCESSED', 
       'return', 
-      `Processed return for INV #${originalSale.id.split('-')[0]}. Refunded Cash: ${refundRemaining}. Debt Reduced: ${originalSale.remainingAmount - updatedRemainingAmount}.`
+      `Return for INV #${originalSale.id.split('-')[0]}. Total Val: ${totalCalculatedRefund.toFixed(2)}. Cash Paid: ${refundRemaining.toFixed(2)}. Debt Reduced: ${(originalSale.remainingAmount - newRemainingAmount).toFixed(2)}.`
     );
 
     return {
       ...currentData,
       products: updatedProducts,
       sales: updatedSales,
-      returns: [returnRecord, ...currentData.returns],
+      returns: [
+        { ...returnRecord, totalRefund: totalCalculatedRefund }, 
+        ...currentData.returns
+      ],
       logs: [log, ...currentData.logs].slice(0, 5000)
     };
   },

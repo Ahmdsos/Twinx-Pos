@@ -1,8 +1,8 @@
-
 import React, { useState, useMemo } from 'react';
-import { AppData, Sale, LogEntry, WholesaleTransaction, SaleReturn } from '../types';
+import { AppData, Sale, LogEntry, WholesaleTransaction, SaleReturn, ReturnItem } from '../types';
 import { Language, translations } from '../translations';
-import { RotateCcw, Search, CheckCircle2, AlertTriangle, ArrowLeft, Package, Minus, Plus, History, Receipt, User } from 'lucide-react';
+import { RotateCcw, Search, CheckCircle2, AlertTriangle, ArrowLeft, Package, Minus, Plus, History, Receipt, User, Info } from 'lucide-react';
+import { TwinXOps } from '../services/operations';
 
 interface ReturnsScreenProps {
   data: AppData;
@@ -19,6 +19,7 @@ const ReturnsScreen: React.FC<ReturnsScreenProps> = ({ data, updateData, addLog,
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
   const [isProcessing, setIsProcessing] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const unifiedSearch = useMemo(() => {
     const term = searchTerm.toLowerCase().trim();
@@ -50,66 +51,107 @@ const ReturnsScreen: React.FC<ReturnsScreenProps> = ({ data, updateData, addLog,
       initialQuants[id] = 0;
     });
     setReturnQuantities(initialQuants);
+    setError(null);
   };
 
   const handleProcessReturn = () => {
     if (!selectedEntry) return;
-    const returnItems: any[] = [];
-    let totalRefund = 0;
+    
+    const returnItems: ReturnItem[] = [];
     const items = selectedEntry.original?.items || [];
 
     Object.entries(returnQuantities).forEach(([productId, qty]) => {
       if (qty > 0) {
+        // Find item in original sale to get price for record
         const item = items.find((i: any) => (selectedEntry.type === 'retail' ? i.id : i.productId) === productId);
         if (item) {
           const price = selectedEntry.type === 'retail' ? item.price : item.unitPrice;
-          returnItems.push({ productId, quantity: qty, refundAmount: price * qty });
-          totalRefund += price * qty;
+          returnItems.push({ 
+            productId, 
+            quantity: qty, 
+            refundAmount: price * qty // TwinXOps will refine this with the Golden Ratio
+          });
         }
       }
     });
 
-    if (returnItems.length === 0) return;
+    if (returnItems.length === 0) {
+      setError(lang === 'ar' ? 'يرجى اختيار صنف واحد على الأقل للإرجاع' : 'Select at least one item to return');
+      return;
+    }
+
     setIsProcessing(true);
 
-    const updatedProducts = data.products.map(p => {
-      const returned = returnItems.find(ri => ri.productId === p.id);
-      if (returned) {
-        const isOutward = selectedEntry.type === 'retail' || (selectedEntry.type === 'wholesale' && selectedEntry.original.type === 'sale');
-        return { ...p, stock: isOutward ? p.stock + returned.quantity : p.stock - returned.quantity };
+    try {
+      if (selectedEntry.type === 'retail') {
+        const returnRecord: SaleReturn = {
+          id: crypto.randomUUID(),
+          saleId: selectedEntry.id,
+          timestamp: Date.now(),
+          items: returnItems,
+          totalRefund: 0, // Calculated by Ops
+          customerName: selectedEntry.original.deliveryDetails?.customerName || (lang === 'ar' ? 'عميل كاش' : 'Cash Customer')
+        };
+
+        const updatedState = TwinXOps.processReturn(data, returnRecord);
+        updateData(updatedState);
+      } else {
+        // Wholesale returns logic (Simple restock and record for now as per TwinX Alpha)
+        const updatedProducts = data.products.map(p => {
+          const returned = returnItems.find(ri => ri.productId === p.id);
+          if (returned) {
+            const isOutward = selectedEntry.original.type === 'sale';
+            return { ...p, stock: isOutward ? p.stock + returned.quantity : p.stock - returned.quantity };
+          }
+          return p;
+        });
+
+        const newReturnRecord: SaleReturn = {
+          id: crypto.randomUUID(),
+          saleId: selectedEntry.id,
+          timestamp: Date.now(),
+          items: returnItems,
+          totalRefund: returnItems.reduce((acc, i) => acc + i.refundAmount, 0),
+          customerName: data.partners.find(p => p.id === selectedEntry.original.partnerId)?.name
+        };
+
+        updateData({
+          products: updatedProducts,
+          returns: [newReturnRecord, ...(data.returns || [])]
+        });
+        
+        addLog({
+          action: 'WHOLESALE_RETURN',
+          category: 'wholesale',
+          details: `Processed wholesale return for ${newReturnRecord.customerName}`
+        });
       }
-      return p;
-    });
 
-    const newReturnRecord: SaleReturn = {
-      id: crypto.randomUUID(),
-      saleId: selectedEntry.id,
-      timestamp: Date.now(),
-      items: returnItems,
-      totalRefund: totalRefund,
-      customerName: selectedEntry.type === 'retail' ? selectedEntry.original.deliveryDetails?.customerName : data.partners.find(p => p.id === selectedEntry.original.partnerId)?.name
-    };
+      setTimeout(() => {
+        setIsProcessing(false);
+        setSuccess(true);
+        setTimeout(() => { 
+          setSuccess(false); 
+          setSelectedEntry(null); 
+          setSearchTerm(''); 
+        }, 1500);
+      }, 800);
 
-    updateData({
-      products: updatedProducts,
-      returns: [newReturnRecord, ...(data.returns || [])]
-    });
-
-    addLog({
-      action: 'RETURN_PROCESSED',
-      category: 'return',
-      details: `Refunded ${data.currency} ${totalRefund.toLocaleString()} for INV: ${selectedEntry.id.split('-')[0]}`
-    });
-
-    setTimeout(() => {
+    } catch (err: any) {
       setIsProcessing(false);
-      setSuccess(true);
-      setTimeout(() => { setSuccess(false); setSelectedEntry(null); setSearchTerm(''); }, 1500);
-    }, 800);
+      setError(err.message || 'Operation Failed');
+    }
   };
 
   return (
     <div className="p-8 h-full flex flex-col gap-6 text-start bg-zinc-950 light:bg-zinc-50">
+      {error && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[200] bg-red-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-top-4 font-black text-sm border border-red-500/50">
+          <AlertTriangle size={20} />
+          {error}
+        </div>
+      )}
+
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-orange-600 rounded-lg shadow-lg shadow-orange-900/20">
@@ -173,17 +215,48 @@ const ReturnsScreen: React.FC<ReturnsScreenProps> = ({ data, updateData, addLog,
                   <div className="space-y-3">
                     {(selectedEntry.original?.items || []).map((item: any) => {
                       const id = selectedEntry.type === 'retail' ? item.id : item.productId;
-                      const qtyReturned = returnQuantities[id] || 0;
+                      const previouslyReturned = item.returnedQuantity || 0;
+                      const availableToReturn = item.quantity - previouslyReturned;
+                      const qtyRequested = returnQuantities[id] || 0;
+                      const isFullyReturned = availableToReturn <= 0;
+
                       return (
-                        <div key={id} className="bg-zinc-800/50 light:bg-zinc-50 border border-zinc-700/50 light:border-zinc-200 p-4 rounded-2xl flex items-center justify-between">
+                        <div 
+                          key={id} 
+                          className={`bg-zinc-800/50 light:bg-zinc-50 border border-zinc-700/50 light:border-zinc-200 p-4 rounded-2xl flex items-center justify-between transition-all ${isFullyReturned ? 'opacity-40 grayscale pointer-events-none' : ''}`}
+                        >
                           <div className="flex items-center gap-4 text-start">
                             <div className="w-10 h-10 rounded-lg bg-zinc-900 light:bg-white flex items-center justify-center border border-zinc-800 light:border-zinc-200"><Package size={20} className="text-zinc-600" /></div>
-                            <div><p className="font-bold text-zinc-100 light:text-zinc-900 leading-tight">{item.name}</p></div>
+                            <div>
+                                <p className="font-bold text-zinc-100 light:text-zinc-900 leading-tight mb-1">{item.name}</p>
+                                <div className="flex items-center gap-3">
+                                   <span className="text-[9px] font-black uppercase text-zinc-500">{lang === 'ar' ? 'المباع' : 'Sold'}: {item.quantity}</span>
+                                   <span className="text-[9px] font-black uppercase text-orange-500">{lang === 'ar' ? 'المرتجع سابقاً' : 'Prev'}: {previouslyReturned}</span>
+                                   <span className="text-[9px] font-black uppercase text-green-500 bg-green-500/10 px-1 rounded">{lang === 'ar' ? 'متاح' : 'Avail'}: {availableToReturn}</span>
+                                </div>
+                            </div>
                           </div>
                           <div className="flex items-center gap-3 bg-zinc-950 light:bg-white p-1.5 rounded-xl border border-zinc-800 light:border-zinc-200">
-                              <button onClick={() => setReturnQuantities({...returnQuantities, [id]: Math.max(0, qtyReturned - 1)})} className="w-8 h-8 rounded-lg bg-zinc-800 light:bg-zinc-100 flex items-center justify-center text-zinc-400"><Minus size={14}/></button>
-                              <input type="number" value={qtyReturned} readOnly className="w-12 bg-transparent border-none p-0 text-center font-black text-orange-500 focus:ring-0" />
-                              <button onClick={() => setReturnQuantities({...returnQuantities, [id]: Math.min(item.quantity, qtyReturned + 1)})} className="w-8 h-8 rounded-lg bg-zinc-800 light:bg-zinc-100 flex items-center justify-center text-zinc-400"><Plus size={14}/></button>
+                              <button 
+                                onClick={() => setReturnQuantities({...returnQuantities, [id]: Math.max(0, qtyRequested - 1)})} 
+                                disabled={isFullyReturned || qtyRequested <= 0}
+                                className="w-8 h-8 rounded-lg bg-zinc-800 light:bg-zinc-100 flex items-center justify-center text-zinc-400 disabled:opacity-20 transition-all"
+                              >
+                                <Minus size={14}/>
+                              </button>
+                              <input 
+                                type="number" 
+                                value={qtyRequested} 
+                                readOnly 
+                                className="w-12 bg-transparent border-none p-0 text-center font-black text-orange-500 focus:ring-0" 
+                              />
+                              <button 
+                                onClick={() => setReturnQuantities({...returnQuantities, [id]: Math.min(availableToReturn, qtyRequested + 1)})} 
+                                disabled={isFullyReturned || qtyRequested >= availableToReturn}
+                                className="w-8 h-8 rounded-lg bg-zinc-800 light:bg-zinc-100 flex items-center justify-center text-zinc-400 disabled:opacity-20 transition-all"
+                              >
+                                <Plus size={14}/>
+                              </button>
                           </div>
                         </div>
                       );
@@ -192,13 +265,22 @@ const ReturnsScreen: React.FC<ReturnsScreenProps> = ({ data, updateData, addLog,
                 </div>
                 <div className="bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-[32px] p-8 flex flex-col gap-6 light:shadow-sm">
                   <div className="p-6 bg-black/20 light:bg-zinc-50 rounded-3xl border border-zinc-800 light:border-zinc-200">
-                    <p className="text-[10px] text-zinc-500 uppercase font-black mb-1">المبلغ المرتجع</p>
-                    <p className="text-4xl font-black text-orange-500 tracking-tighter">{data.currency} {Object.entries(returnQuantities).reduce((acc, [id, q]) => {
-                      const item = selectedEntry.original.items.find((i: any) => (selectedEntry.type === 'retail' ? i.id : i.productId) === id);
-                      return acc + ((selectedEntry.type === 'retail' ? item?.price : item?.unitPrice) || 0) * q;
-                    }, 0).toLocaleString()}</p>
+                    <p className="text-[10px] text-zinc-500 uppercase font-black mb-1">المبلغ المرتجع التقديري</p>
+                    <p className="text-4xl font-black text-orange-500 tracking-tighter">
+                      {data.currency} {Object.entries(returnQuantities).reduce((acc, [id, q]) => {
+                        const item = selectedEntry.original.items.find((i: any) => (selectedEntry.type === 'retail' ? i.id : i.productId) === id);
+                        return acc + ((selectedEntry.type === 'retail' ? item?.price : item?.unitPrice) || 0) * q;
+                      }, 0).toLocaleString()}
+                    </p>
+                    <p className="text-[9px] text-zinc-500 mt-2 flex items-center gap-1.5"><Info size={10}/> {lang === 'ar' ? 'سيتم تطبيق الخصم النسبي تلقائياً' : 'Proportional discount applied automatically'}</p>
                   </div>
-                  <button onClick={handleProcessReturn} className="w-full py-5 bg-orange-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl">{t.authorize_refund}</button>
+                  <button 
+                    onClick={handleProcessReturn} 
+                    disabled={isProcessing}
+                    className="w-full py-5 bg-orange-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl disabled:opacity-50 flex items-center justify-center gap-2 transition-all"
+                  >
+                    {isProcessing ? <RotateCcw size={18} className="animate-spin" /> : t.authorize_refund}
+                  </button>
                 </div>
               </div>
             </div>
@@ -216,15 +298,37 @@ const ReturnsScreen: React.FC<ReturnsScreenProps> = ({ data, updateData, addLog,
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800/50 light:divide-zinc-200">
-                  {data.returns.map(ret => (
+                  {(data.returns || []).map(ret => (
                     <tr key={ret.id}>
                       <td className="px-8 py-4 text-xs font-mono text-zinc-400">{new Date(ret.timestamp).toLocaleString()}</td>
                       <td className="px-8 py-4 text-xs font-bold text-zinc-300 light:text-zinc-600 flex items-center gap-2"><User size={12}/> {ret.customerName || '---'}</td>
                       <td className="px-8 py-4 font-black text-orange-500">{data.currency} {ret.totalRefund.toLocaleString()}</td>
                     </tr>
                   ))}
+                  {(!data.returns || data.returns.length === 0) && (
+                    <tr>
+                      <td colSpan={3} className="px-8 py-20 text-center opacity-20 grayscale">
+                        <History size={48} className="mx-auto mb-4" />
+                        <p className="text-xs font-black uppercase tracking-widest">{lang === 'ar' ? 'لا توجد مرتجعات مسجلة' : 'No recorded returns'}</p>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
+           </div>
+        </div>
+      )}
+
+      {success && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/90 backdrop-blur-xl animate-in fade-in duration-300">
+           <div className="bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 p-12 rounded-[40px] text-center space-y-6 shadow-2xl animate-in zoom-in-95 duration-300">
+              <div className="w-20 h-20 bg-green-500/10 rounded-full flex items-center justify-center mx-auto text-green-500 border border-green-500/20">
+                <CheckCircle2 size={40} />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-3xl font-black uppercase tracking-tighter light:text-zinc-900">{t.return_finalized}</h3>
+                <p className="text-zinc-500 text-sm font-bold">{t.restock_notice}</p>
+              </div>
            </div>
         </div>
       )}
