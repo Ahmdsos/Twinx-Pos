@@ -60,7 +60,8 @@ const ReturnsScreen: React.FC<ReturnsScreenProps> = ({ data, updateData, addLog,
     const returnItems: ReturnItem[] = [];
     const items = selectedEntry.original?.items || [];
 
-    Object.entries(returnQuantities).forEach(([productId, qty]) => {
+    // Cast Object.entries to ensure qty is treated as number to fix line 64 error
+    (Object.entries(returnQuantities) as [string, number][]).forEach(([productId, qty]) => {
       if (qty > 0) {
         // Find item in original sale to get price for record
         const item = items.find((i: any) => (selectedEntry.type === 'retail' ? i.id : i.productId) === productId);
@@ -267,7 +268,8 @@ const ReturnsScreen: React.FC<ReturnsScreenProps> = ({ data, updateData, addLog,
                   <div className="p-6 bg-black/20 light:bg-zinc-50 rounded-3xl border border-zinc-800 light:border-zinc-200">
                     <p className="text-[10px] text-zinc-500 uppercase font-black mb-1">المبلغ المرتجع التقديري</p>
                     <p className="text-4xl font-black text-orange-500 tracking-tighter">
-                      {data.currency} {Object.entries(returnQuantities).reduce((acc, [id, q]) => {
+                      {/* Cast Object.entries to number types for arithmetic operation to fix line 272 error */}
+                      {data.currency} {(Object.entries(returnQuantities) as [string, number][]).reduce((acc, [id, q]) => {
                         const item = selectedEntry.original.items.find((i: any) => (selectedEntry.type === 'retail' ? i.id : i.productId) === id);
                         return acc + ((selectedEntry.type === 'retail' ? item?.price : item?.unitPrice) || 0) * q;
                       }, 0).toLocaleString()}
