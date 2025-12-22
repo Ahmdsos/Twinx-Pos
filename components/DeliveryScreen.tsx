@@ -16,8 +16,11 @@ import {
   ChevronRight,
   CheckCircle2,
   XCircle,
-  Package
+  Package,
+  RefreshCw,
+  RotateCcw
 } from 'lucide-react';
+import { TwinXOps } from '../services/operations';
 
 interface DeliveryScreenProps {
   data: AppData;
@@ -52,12 +55,48 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
   }, [data.sales, selectedDriverId]);
 
   const driverStats = useMemo(() => {
-    return driverOrders.reduce((acc, sale) => ({
-      totalCash: acc.totalCash + sale.total,
-      totalFees: acc.totalFees + (sale.deliveryFee || 0),
-      count: acc.count + 1
-    }), { totalCash: 0, totalFees: 0, count: 0 });
+    return driverOrders.reduce((acc, sale) => {
+      // Only count non-cancelled orders for cash totals
+      const isCountable = sale.status !== 'cancelled';
+      return {
+        totalCash: acc.totalCash + (isCountable ? sale.total : 0),
+        totalFees: acc.totalFees + (isCountable ? (sale.deliveryFee || 0) : 0),
+        count: acc.count + (isCountable ? 1 : 0)
+      };
+    }, { totalCash: 0, totalFees: 0, count: 0 });
   }, [driverOrders]);
+
+  const handleUpdateStatus = (saleId: string, status: 'delivered' | 'cancelled' | 'pending') => {
+    try {
+      const updatedData = TwinXOps.updateDeliveryStatus(data, saleId, status);
+      updateData(updatedData);
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleReOrder = (saleId: string) => {
+    if (confirm(lang === 'ar' ? 'هل تريد تكرار هذا الأوردر كطلب جديد؟' : 'Duplicate this as a new order?')) {
+      try {
+        const updatedData = TwinXOps.duplicateSale(data, saleId);
+        updateData(updatedData);
+        alert(lang === 'ar' ? 'تم إنشاء طلب جديد بنجاح' : 'New order created successfully');
+      } catch (err: any) {
+        alert(err.message);
+      }
+    }
+  };
+
+  const getStatusBadge = (status?: string) => {
+    switch (status) {
+      case 'delivered':
+        return <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-green-500/10 text-green-500 border border-green-500/20">{lang === 'ar' ? 'تم التوصيل' : 'Delivered'}</span>;
+      case 'cancelled':
+        return <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-red-500/10 text-red-500 border border-red-500/20">{lang === 'ar' ? 'ملغي' : 'Cancelled'}</span>;
+      default:
+        return <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-orange-500/10 text-orange-500 border border-orange-500/20 animate-pulse">{lang === 'ar' ? 'قيد التوصيل' : 'Pending'}</span>;
+    }
+  };
 
   return (
     <div className="p-8 h-full flex flex-col gap-6 text-start bg-zinc-950 light:bg-zinc-50 overflow-hidden">
@@ -78,12 +117,12 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
             <input
               type="text"
               placeholder={t.search}
-              className="bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-xl py-2.5 px-10 focus:outline-none focus:border-red-500 w-64 text-sm light:text-zinc-900"
+              className="bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-xl py-2.5 px-10 focus:outline-none focus:border-red-500 w-64 text-sm light:text-zinc-900 shadow-sm"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          <div className="px-4 py-2 bg-zinc-800 light:bg-zinc-100 rounded-xl text-[10px] font-black uppercase text-zinc-500 border border-zinc-700 light:border-zinc-200">
+          <div className="px-4 py-2 bg-zinc-800 light:bg-zinc-100 rounded-xl text-[10px] font-black uppercase text-zinc-500 border border-zinc-700 light:border-zinc-200 shadow-sm">
              {lang === 'ar' ? 'المتاح حالياً: ' : 'Active: '} {deliveryStaff.length}
           </div>
         </div>
@@ -112,8 +151,8 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
                >
                  <div className="flex items-center gap-4">
                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black ${selectedDriverId === d.id ? 'bg-red-600 text-white' : 'bg-zinc-800 light:bg-zinc-100 text-zinc-500'}`}>{d.name.charAt(0)}</div>
-                   <div>
-                     <p className="font-bold text-zinc-100 light:text-zinc-900">{d.name}</p>
+                   <div className="min-w-0">
+                     <p className="font-bold text-zinc-100 light:text-zinc-900 truncate uppercase tracking-tight">{d.name}</p>
                      <p className="text-[10px] text-zinc-500 font-mono">{d.phone}</p>
                    </div>
                  </div>
@@ -174,43 +213,84 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
                     </div>
                  </div>
                  
-                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                    {driverOrders.map(sale => (
-                     <div key={sale.id} className="bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 p-6 rounded-[32px] flex flex-col gap-6 hover:border-red-600/40 transition-all shadow-lg group">
+                     <div key={sale.id} className={`bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 p-6 rounded-[32px] flex flex-col gap-6 hover:border-red-600/40 transition-all shadow-lg group relative overflow-hidden ${sale.status === 'cancelled' ? 'opacity-60 grayscale' : ''}`}>
+                        
+                        {/* Status Overlay for Cancelled */}
+                        {sale.status === 'cancelled' && (
+                          <div className="absolute top-4 right-4 rotate-12 px-3 py-1 bg-red-600 text-white font-black text-[10px] uppercase rounded shadow-lg z-10">{lang === 'ar' ? 'ملغي' : 'Cancelled'}</div>
+                        )}
+
                         <div className="flex justify-between items-start">
                            <div className="flex items-center gap-3">
                               <div className="w-10 h-10 rounded-2xl bg-zinc-800 light:bg-zinc-100 flex items-center justify-center text-zinc-500 group-hover:text-red-500 transition-colors"><Receipt size={20}/></div>
                               <div>
-                                 <p className="font-black text-zinc-100 light:text-zinc-900 leading-none mb-1 uppercase tracking-tighter">#{sale.id.split('-')[0]}</p>
-                                 <p className="text-[10px] text-zinc-500 font-mono font-black">{new Date(sale.timestamp).toLocaleTimeString()}</p>
+                                 <div className="flex items-center gap-2 mb-1">
+                                    <p className="font-black text-zinc-100 light:text-zinc-900 leading-none uppercase tracking-tighter">#{sale.id.split('-')[0]}</p>
+                                    {getStatusBadge(sale.status)}
+                                 </div>
+                                 <p className="text-[10px] text-zinc-500 font-mono font-black">{new Date(sale.timestamp).toLocaleString()}</p>
                               </div>
                            </div>
-                           <button onClick={() => onSelectSale(sale)} className="p-2 text-zinc-600 hover:text-zinc-100"><ArrowUpRight size={18}/></button>
+                           <button onClick={() => onSelectSale(sale)} className="p-2 text-zinc-600 hover:text-zinc-100 transition-colors"><ArrowUpRight size={18}/></button>
                         </div>
 
                         <div className="p-4 bg-zinc-950 light:bg-zinc-50 rounded-2xl border border-zinc-800 light:border-zinc-200 space-y-1">
                            <p className="text-[9px] font-black uppercase text-zinc-500">{t.customer_details}</p>
-                           <p className="font-bold text-sm light:text-zinc-900 truncate">{sale.deliveryDetails?.customerName}</p>
+                           <p className="font-bold text-sm light:text-zinc-900 truncate uppercase tracking-tight">{sale.deliveryDetails?.customerName || t.cash_customer}</p>
                            <p className="text-xs text-zinc-600 font-mono">{sale.deliveryDetails?.customerPhone}</p>
                         </div>
 
                         <div className="flex items-center justify-between mt-auto">
                            <div className="text-start">
                               <p className="text-[9px] font-black uppercase text-zinc-600">{lang === 'ar' ? 'المطلوب تحصيله' : 'To Collect'}</p>
-                              <p className="text-xl font-black text-red-600">{data.currency} {sale.total.toLocaleString()}</p>
+                              <p className="text-xl font-black text-red-600 tracking-tighter">{data.currency} {sale.total.toLocaleString()}</p>
                            </div>
                            <div className="flex gap-2">
-                              {/* Order Lifecycle Control */}
-                              <button className="w-10 h-10 rounded-xl bg-green-500/10 text-green-500 border border-green-500/20 flex items-center justify-center hover:bg-green-600 hover:text-white transition-all"><CheckCircle2 size={18}/></button>
-                              <button className="w-10 h-10 rounded-xl bg-red-500/10 text-red-500 border border-red-500/20 flex items-center justify-center hover:bg-red-600 hover:text-white transition-all"><XCircle size={18}/></button>
+                              {/* Order Lifecycle Controls */}
+                              {sale.status !== 'delivered' && sale.status !== 'cancelled' ? (
+                                <>
+                                  <button 
+                                    onClick={() => handleUpdateStatus(sale.id, 'delivered')}
+                                    title={lang === 'ar' ? 'تأكيد التسليم' : 'Mark Delivered'}
+                                    className="w-12 h-12 rounded-2xl bg-green-500/10 text-green-500 border border-green-500/20 flex items-center justify-center hover:bg-green-600 hover:text-white transition-all shadow-lg"
+                                  >
+                                    <CheckCircle2 size={22}/>
+                                  </button>
+                                  <button 
+                                    onClick={() => handleUpdateStatus(sale.id, 'cancelled')}
+                                    title={lang === 'ar' ? 'إلغاء الطلب / مرتجع' : 'Cancel / Return'}
+                                    className="w-12 h-12 rounded-2xl bg-red-500/10 text-red-500 border border-red-500/20 flex items-center justify-center hover:bg-red-600 hover:text-white transition-all shadow-lg"
+                                  >
+                                    <XCircle size={22}/>
+                                  </button>
+                                </>
+                              ) : sale.status === 'cancelled' ? (
+                                <button 
+                                  onClick={() => handleUpdateStatus(sale.id, 'pending')}
+                                  className="px-4 py-2 rounded-xl bg-orange-600/10 text-orange-500 border border-orange-500/20 flex items-center gap-2 text-[10px] font-black uppercase hover:bg-orange-600 hover:text-white transition-all"
+                                >
+                                  <RotateCcw size={14}/> {lang === 'ar' ? 'استعادة' : 'Restore'}
+                                </button>
+                              ) : (
+                                <button 
+                                  onClick={() => handleReOrder(sale.id)}
+                                  className="px-4 py-2 rounded-xl bg-blue-600/10 text-blue-500 border border-blue-500/20 flex items-center gap-2 text-[10px] font-black uppercase hover:bg-blue-600 hover:text-white transition-all"
+                                >
+                                  <RefreshCw size={14}/> {lang === 'ar' ? 'تكرار الطلب' : 'Re-Order'}
+                                </button>
+                              )}
                            </div>
                         </div>
                      </div>
                    ))}
                    {driverOrders.length === 0 && (
-                     <div className="col-span-full py-20 text-center space-y-4 opacity-20">
-                        <Package size={48} className="mx-auto" />
-                        <p className="text-xs font-black uppercase tracking-widest">{lang === 'ar' ? 'لا توجد أوردرات نشطة للطيار' : 'No active orders assigned'}</p>
+                     <div className="col-span-full py-24 text-center space-y-4 opacity-20">
+                        <Package size={48} className="mx-auto text-zinc-700" />
+                        <p className="text-xs font-black uppercase tracking-widest leading-relaxed">
+                          {lang === 'ar' ? 'لا توجد أوردرات نشطة للطيار' : 'No active orders assigned'}
+                        </p>
                      </div>
                    )}
                  </div>

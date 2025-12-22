@@ -20,7 +20,7 @@ export const TwinXOps = {
    * Financial Truth Helpers
    */
   getTotals: (data: AppData) => {
-    const receivables = data.sales.reduce((acc, s) => acc + (s.remainingAmount || 0), 0) +
+    const receivables = data.sales.reduce((acc, s) => acc + (s.status !== 'cancelled' ? (s.remainingAmount || 0) : 0), 0) +
       data.wholesaleTransactions
         .filter(t => t.type === 'sale')
         .reduce((acc, t) => acc + (t.total - t.paidAmount), 0);
@@ -88,7 +88,8 @@ export const TwinXOps = {
       driverId: saleData.driverId,
       totalCost,
       totalProfit,
-      pointsEarned
+      pointsEarned,
+      status: saleData.status || (saleData.isDelivery ? 'pending' : 'completed')
     };
 
     const updatedCustomers = currentData.customers.map(c => {
@@ -106,7 +107,7 @@ export const TwinXOps = {
       return c;
     });
 
-    const log = createLog('SALE_COMPLETED', 'sale', `Retail Sale #${finalSale.id.split('-')[0]} for ${total}. Net Profit: ${totalProfit.toFixed(2)} (Products: ${productProfit.toFixed(2)}, Delivery: ${deliveryIncome.toFixed(2)}).`);
+    const log = createLog('SALE_COMPLETED', 'sale', `Retail Sale #${finalSale.id.split('-')[0]} for ${total}. Net Profit: ${totalProfit.toFixed(2)}. Points: +${pointsEarned}.`);
 
     return {
       ...currentData,
@@ -115,6 +116,99 @@ export const TwinXOps = {
       customers: updatedCustomers,
       logs: [log, ...currentData.logs].slice(0, 5000)
     };
+  },
+
+  /**
+   * Update order/delivery status.
+   * If cancelled, automatically restocks and reverses financials.
+   */
+  updateDeliveryStatus: (currentData: AppData, saleId: string, status: 'delivered' | 'cancelled' | 'pending'): AppData => {
+    const saleIndex = currentData.sales.findIndex(s => s.id === saleId);
+    if (saleIndex === -1) throw new Error("Sale record not found.");
+    const originalSale = { ...currentData.sales[saleIndex] };
+    
+    if (originalSale.status === status) return currentData;
+
+    let updatedProducts = currentData.products;
+    let updatedCustomers = currentData.customers;
+
+    // Transitioning TO cancelled from anything else: Restock & Reverse stats
+    if (status === 'cancelled' && originalSale.status !== 'cancelled') {
+      updatedProducts = currentData.products.map(p => {
+        const soldItem = originalSale.items.find(i => i.id === p.id);
+        return soldItem ? { ...p, stock: p.stock + (soldItem.quantity - (soldItem.returnedQuantity || 0)) } : p;
+      });
+
+      if (originalSale.customerId) {
+        updatedCustomers = currentData.customers.map(c => {
+          if (c.id === originalSale.customerId) {
+            return {
+              ...c,
+              totalPurchases: Math.max(0, c.totalPurchases - originalSale.total),
+              invoiceCount: Math.max(0, c.invoiceCount - 1),
+              totalPoints: Math.max(0, (c.totalPoints || 0) - (originalSale.pointsEarned || 0))
+            };
+          }
+          return c;
+        });
+      }
+    } 
+    // Transitioning AWAY from cancelled back to active: Deduct stock & Restore stats
+    else if (status !== 'cancelled' && originalSale.status === 'cancelled') {
+       updatedProducts = currentData.products.map(p => {
+        const soldItem = originalSale.items.find(i => i.id === p.id);
+        if (soldItem && p.stock < soldItem.quantity) throw new Error(`Insufficient stock to restore order: ${p.name}`);
+        return soldItem ? { ...p, stock: p.stock - soldItem.quantity } : p;
+      });
+
+      if (originalSale.customerId) {
+        updatedCustomers = currentData.customers.map(c => {
+          if (c.id === originalSale.customerId) {
+            return {
+              ...c,
+              totalPurchases: c.totalPurchases + originalSale.total,
+              invoiceCount: c.invoiceCount + 1,
+              totalPoints: (c.totalPoints || 0) + (originalSale.pointsEarned || 0)
+            };
+          }
+          return c;
+        });
+      }
+    }
+
+    const updatedSales = [...currentData.sales];
+    updatedSales[saleIndex] = { ...originalSale, status };
+
+    const log = createLog('STATUS_UPDATE', 'delivery', `Order #${saleId.split('-')[0]} set to ${status.toUpperCase()}.`);
+
+    return {
+      ...currentData,
+      products: updatedProducts,
+      sales: updatedSales,
+      customers: updatedCustomers,
+      logs: [log, ...currentData.logs].slice(0, 5000)
+    };
+  },
+
+  /**
+   * Re-orders a previous sale.
+   * Duplicates items and triggers a new sale transaction.
+   */
+  duplicateSale: (currentData: AppData, originalSaleId: string): AppData => {
+    const original = currentData.sales.find(s => s.id === originalSaleId);
+    if (!original) throw new Error("Original sale record not found.");
+
+    const reOrderData: Partial<Sale> = {
+      ...original,
+      id: crypto.randomUUID(),
+      timestamp: Date.now(),
+      paidAmount: 0, 
+      remainingAmount: original.total,
+      status: original.isDelivery ? 'pending' : 'completed',
+      items: original.items.map(i => ({ ...i, returnedQuantity: 0 }))
+    };
+
+    return TwinXOps.processRetailSale(currentData, reOrderData);
   },
 
   /**

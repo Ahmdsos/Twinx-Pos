@@ -110,6 +110,7 @@ export interface Sale {
   totalCost: number; // Financial Pro
   totalProfit: number; // Financial Pro
   pointsEarned: number; // Loyalty Pro
+  status?: 'pending' | 'delivered' | 'cancelled' | 'completed';
 }
 
 export interface DraftInvoice {
