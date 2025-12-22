@@ -21,7 +21,8 @@ import {
   Instagram,
   Store,
   DollarSign,
-  Hash
+  Hash,
+  Calendar
 } from 'lucide-react';
 
 interface CustomersScreenProps {
@@ -99,14 +100,6 @@ const CustomersScreen: React.FC<CustomersScreenProps> = ({ data, updateData, add
     return selectedCustomer.totalPurchases / selectedCustomer.invoiceCount;
   }, [selectedCustomer]);
 
-  const getChannelIcon = (channel: string) => {
-    switch (channel) {
-      case 'social_media': return <Instagram size={12} />;
-      case 'website': return <Globe size={12} />;
-      default: return <Store size={12} />;
-    }
-  };
-
   return (
     <div className="p-8 h-full flex flex-col gap-6 text-start bg-zinc-950 light:bg-zinc-50 overflow-hidden">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 shrink-0">
@@ -116,7 +109,7 @@ const CustomersScreen: React.FC<CustomersScreenProps> = ({ data, updateData, add
           </div>
           <div>
             <h3 className="text-2xl font-black tracking-tighter text-zinc-100 light:text-zinc-900 uppercase leading-none">{t.customers}</h3>
-            <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-black mt-1">{lang === 'ar' ? 'قاعدة بيانات المستهلكين' : 'Consumer Database Management'}</p>
+            <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-black mt-1">{lang === 'ar' ? 'سجل الولاء والمديونيات' : 'Loyalty & Debt Registry'}</p>
           </div>
         </div>
 
@@ -165,7 +158,7 @@ const CustomersScreen: React.FC<CustomersScreenProps> = ({ data, updateData, add
            </div>
         </div>
 
-        {/* Profile */}
+        {/* Profile Details */}
         <div className="lg:col-span-2 bg-zinc-900/10 light:bg-zinc-50 border border-zinc-800 light:border-zinc-200 rounded-[40px] overflow-hidden flex flex-col shadow-2xl relative">
            {!selectedCustomer ? (
              <div className="flex-1 flex flex-col items-center justify-center text-center p-12 space-y-4 opacity-30">
@@ -182,6 +175,7 @@ const CustomersScreen: React.FC<CustomersScreenProps> = ({ data, updateData, add
                       <div className="flex flex-wrap gap-4">
                         <span className="flex items-center gap-1.5 text-[10px] font-black uppercase text-zinc-500"><Phone size={12}/> {selectedCustomer.phone}</span>
                         {selectedCustomer.address && <span className="flex items-center gap-1.5 text-[10px] font-black uppercase text-zinc-500"><MapPin size={12}/> {selectedCustomer.address}</span>}
+                        {selectedCustomer.lastVisit && <span className="flex items-center gap-1.5 text-[10px] font-black uppercase text-zinc-500"><Clock size={12}/> {new Date(selectedCustomer.lastVisit).toLocaleDateString()}</span>}
                       </div>
                     </div>
                  </div>
@@ -202,11 +196,11 @@ const CustomersScreen: React.FC<CustomersScreenProps> = ({ data, updateData, add
                   </div>
                   <div className="p-6 bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-3xl shadow-sm text-start">
                     <p className="text-[9px] font-black uppercase text-zinc-500 mb-1">{t.total_purchases}</p>
-                    <p className="text-3xl font-black text-red-500 tracking-tighter">{data.currency} {selectedCustomer.totalPurchases.toLocaleString()}</p>
+                    <p className="text-3xl font-black text-emerald-500 tracking-tighter">{data.currency} {selectedCustomer.totalPurchases.toLocaleString()}</p>
                   </div>
                   <div className="p-6 bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-3xl shadow-sm text-start">
-                    <p className="text-[9px] font-black uppercase text-zinc-500 mb-1">{lang === 'ar' ? 'آخر زيارة' : 'Last Visit'}</p>
-                    <p className="text-sm font-black text-zinc-400 mt-2 uppercase">{selectedCustomer.lastVisit ? new Date(selectedCustomer.lastVisit).toLocaleDateString() : '---'}</p>
+                    <p className="text-[9px] font-black uppercase text-zinc-500 mb-1">{t.avg_order_value}</p>
+                    <p className="text-xl font-black text-zinc-400 mt-2 uppercase">{data.currency} {avgOrderValue.toLocaleString()}</p>
                   </div>
                </div>
 
@@ -227,12 +221,16 @@ const CustomersScreen: React.FC<CustomersScreenProps> = ({ data, updateData, add
                        <div className="text-end flex items-center gap-6">
                          <div>
                             <p className="font-black text-xl text-red-500 tracking-tighter">{data.currency} {sale.total.toLocaleString()}</p>
-                            <p className="text-[8px] font-black uppercase tracking-widest text-zinc-600">{t[sale.saleChannel]}</p>
+                            <div className="flex justify-end gap-2 mt-1">
+                               {sale.remainingAmount > 0 && <span className="px-1.5 py-0.5 bg-orange-600/10 text-orange-500 text-[8px] font-black rounded border border-orange-500/20 uppercase tracking-widest">{lang === 'ar' ? 'آجل' : 'Debt'}</span>}
+                               <p className="text-[8px] font-black uppercase tracking-widest text-zinc-600">{t[sale.saleChannel]}</p>
+                            </div>
                          </div>
                          <ArrowUpRight size={18} className="text-zinc-700 opacity-0 group-hover:opacity-100 transition-opacity" />
                        </div>
                      </div>
                    ))}
+                   {customerInvoices.length === 0 && <p className="text-center py-20 text-zinc-600 font-bold uppercase text-xs">{lang === 'ar' ? 'لا توجد فواتير مرتبطة بهذا الحساب' : 'No invoices linked to this profile'}</p>}
                  </div>
                </div>
              </div>
