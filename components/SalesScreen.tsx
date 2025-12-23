@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { AppData, Product, Sale, CartItem, LogEntry, Customer, SaleChannel, WholesalePartner, WholesaleTransaction, Employee } from '../types';
+import { AppData, Product, Sale, CartItem, LogEntry, Customer, SaleChannel, WholesalePartner, WholesaleTransaction } from '../types';
 import { translations, Language } from '../translations';
 import { 
   Search, 
@@ -24,12 +24,12 @@ import {
   Lock,
   Unlock,
   ArrowUpRight,
-  ArrowDownLeft,
   Briefcase,
   UserCircle,
   Contact,
   Tag,
-  Percent
+  Percent,
+  ScanBarcode
 } from 'lucide-react';
 import LocalImage from './LocalImage';
 import { TwinXOps } from '../services/operations';
@@ -39,9 +39,11 @@ interface SalesScreenProps {
   updateData: (newData: Partial<AppData>) => void;
   addLog: (log: Omit<LogEntry, 'id' | 'timestamp'>) => void;
   lang: Language;
+  reorderSale: Sale | null;
+  onClearReorder: () => void;
 }
 
-const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lang }) => {
+const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lang, reorderSale, onClearReorder }) => {
   const t = translations[lang];
   const [searchTerm, setSearchTerm] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -52,6 +54,10 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
   const [selectedDriverId, setSelectedDriverId] = useState<string>('');
   const [saleChannel, setSaleChannel] = useState<SaleChannel>('store');
   
+  // Scanner Toggle State
+  const [scanMode, setScanMode] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
   // POS Mode: Retail or Wholesale
   const [posMode, setPosMode] = useState<'retail' | 'wholesale'>('retail');
   
@@ -79,6 +85,47 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
 
   const [successSale, setSuccessSale] = useState<{id: string, type: 'retail' | 'wholesale' } | null>(null);
   const [stockError, setStockError] = useState<string | null>(null);
+
+  // Re-Order Hydration Effect
+  useEffect(() => {
+    if (reorderSale) {
+      // 1. Restore Cart
+      const restoredCart = reorderSale.items.map(item => ({
+        ...item,
+        quantity: item.quantity, 
+        // Note: Prices might have changed in DB, but re-order usually respects snapshot or current price?
+        // TwinX logic: Use current DB price if available, else fallback to sale price
+        price: data.products.find(p => p.id === item.id)?.price || item.price 
+      }));
+      setCart(restoredCart);
+
+      // 2. Restore Customer Info
+      if (reorderSale.isDelivery && reorderSale.deliveryDetails) {
+        setIsDelivery(true);
+        setCustomerDetails({
+            name: reorderSale.deliveryDetails.customerName,
+            phone: reorderSale.deliveryDetails.customerPhone,
+            address: reorderSale.deliveryDetails.deliveryAddress
+        });
+        setDeliveryFee(reorderSale.deliveryFee || 0);
+        setIsCustomerLocked(true); // Lock it to prevent accidental wipe
+      } else if (reorderSale.customerId) {
+        const cust = data.customers.find(c => c.id === reorderSale.customerId);
+        if (cust) {
+            setCustomerDetails({ name: cust.name, phone: cust.phone, address: cust.address || '' });
+            setIsCustomerLocked(true);
+        }
+      }
+
+      // 3. Restore Metadata
+      setSaleChannel(reorderSale.saleChannel);
+      setDiscountType(reorderSale.discountType || 'percentage');
+      setDiscountValue(reorderSale.discountValue || 0);
+      
+      // Clear props to avoid loop
+      onClearReorder();
+    }
+  }, [reorderSale, data.products, data.customers]);
 
   // Derived: Unified Delivery Staff from HR Module
   const deliveryStaff = useMemo(() => {
@@ -141,6 +188,21 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
       (p.barcode && p.barcode.toLowerCase().includes(term))
     );
   }, [data.products, searchTerm]);
+
+  // Handle Barcode Scan Logic (Simple exact match focus)
+  useEffect(() => {
+    if (scanMode && searchInputRef.current) {
+        searchInputRef.current.focus();
+    }
+  }, [scanMode]);
+
+  const handleProductSelect = (product: Product) => {
+      addToCart(product);
+      if (scanMode) {
+          setSearchTerm(''); // Clear search after scan-add
+          if (searchInputRef.current) searchInputRef.current.focus();
+      }
+  };
 
   const addToCart = (product: Product) => {
     setCart(prev => {
@@ -273,9 +335,7 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
       if (existingCustomer) {
         linkedCustomerId = existingCustomer.id;
       } else if (customerDetails.phone) {
-        // If phone entered but not found, we pass details to Ops. 
-        // Note: Ops currently expects ID to exist or it creates one if we modify it to do so.
-        // For strict TwinX integrity, we ensure ID is determined here.
+        // Create new ID locally so we can link it
         linkedCustomerId = crypto.randomUUID();
         const newCustomer: Customer = {
           id: linkedCustomerId,
@@ -287,8 +347,9 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
           channelsUsed: [saleChannel],
           totalPoints: 0
         };
-        // Inject new customer into current state for Ops to consume
-        data.customers.push(newCustomer);
+        // We push to data temporarily so Ops can find it, or Ops handles creation. 
+        // TwinX Ops is strict, so we pre-inject if missing.
+        if (!existingCustomer) data.customers.push(newCustomer);
       }
 
       const saleData: Partial<Sale> = {
@@ -306,7 +367,7 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
           deliveryAddress: customerDetails.address
         } : undefined,
         driverId: isDelivery ? selectedDriverId : undefined,
-        paidAmount: total, // Retail is usually full paid
+        paidAmount: total,
         timestamp: Date.now()
       };
 
@@ -381,6 +442,7 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
     setSaleChannel('store');
     setDeliveryFee(0);
     clearLookup();
+    setSearchTerm('');
   };
 
   return (
@@ -393,15 +455,25 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
       )}
 
       <div className="flex-1 flex flex-col p-8 gap-6 overflow-hidden">
-        <div className="relative shrink-0">
-          <Search size={20} className={`absolute ${lang === 'ar' ? 'right-4' : 'left-4'} top-1/2 -translate-y-1/2 text-zinc-500`} />
-          <input
-            type="text"
-            placeholder={t.scan_barcode}
-            className={`w-full bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-2xl py-4 ${lang === 'ar' ? 'pr-12 pl-4' : 'pl-12 pr-4'} focus:outline-none focus:border-red-500 transition-all font-bold text-zinc-100 light:text-zinc-900 shadow-lg light:shadow-sm`}
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+        <div className="relative shrink-0 flex gap-2">
+          <div className="relative flex-1">
+             <Search size={20} className={`absolute ${lang === 'ar' ? 'right-4' : 'left-4'} top-1/2 -translate-y-1/2 text-zinc-500`} />
+             <input
+               ref={searchInputRef}
+               type="text"
+               placeholder={scanMode ? (lang === 'ar' ? 'جاهز للمسح...' : 'Ready to scan...') : t.scan_barcode}
+               className={`w-full bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-2xl py-4 ${lang === 'ar' ? 'pr-12 pl-4' : 'pl-12 pr-4'} focus:outline-none focus:border-red-500 transition-all font-bold text-zinc-100 light:text-zinc-900 shadow-lg light:shadow-sm ${scanMode ? 'border-red-500 ring-2 ring-red-500/20' : ''}`}
+               value={searchTerm}
+               onChange={(e) => setSearchTerm(e.target.value)}
+               autoFocus={scanMode}
+             />
+          </div>
+          <button 
+             onClick={() => setScanMode(!scanMode)}
+             className={`px-4 rounded-2xl border transition-all flex items-center gap-2 font-black text-xs uppercase ${scanMode ? 'bg-red-600 border-red-500 text-white shadow-lg' : 'bg-zinc-900 light:bg-white border-zinc-800 light:border-zinc-200 text-zinc-500'}`}
+          >
+             <ScanBarcode size={20}/> {scanMode ? 'ON' : 'OFF'}
+          </button>
         </div>
 
         <div className="flex-1 flex flex-col gap-6 overflow-hidden">
@@ -417,7 +489,7 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
                 {displayedProducts.map(p => (
                   <button
                     key={p.id}
-                    onClick={() => addToCart(p)}
+                    onClick={() => handleProductSelect(p)}
                     className="group bg-zinc-900/50 light:bg-white hover:bg-zinc-800 light:hover:bg-zinc-50 border border-zinc-800 light:border-zinc-200 hover:border-red-500/50 rounded-2xl p-3 transition-all flex flex-col gap-3 text-start relative overflow-hidden shadow-sm"
                   >
                     <div className="aspect-square w-full rounded-xl bg-black light:bg-zinc-100 border border-zinc-800 light:border-zinc-200 overflow-hidden shrink-0">

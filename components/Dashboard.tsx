@@ -1,3 +1,4 @@
+
 import React, { useMemo, useState } from 'react';
 import { AppData, Sale, ViewType, Product } from '../types';
 import { 
@@ -18,7 +19,8 @@ import {
   Coins,
   Wallet,
   HandCoins,
-  Scale
+  Scale,
+  UserCheck
 } from 'lucide-react';
 import { translations, Language } from '../translations';
 
@@ -33,6 +35,14 @@ interface DashboardProps {
 const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale, cashBalance }) => {
   const t = translations[lang];
   const [detailModal, setDetailModal] = useState<'alerts' | null>(null);
+
+  const activeShift = useMemo(() => {
+    return data.shifts.find(s => s.status === 'open');
+  }, [data.shifts]);
+
+  const activeShiftEmployee = useMemo(() => {
+    return activeShift ? data.employees.find(e => e.id === activeShift.cashierId) : null;
+  }, [activeShift, data.employees]);
 
   const stats = useMemo(() => {
     const sales = data?.sales || [];
@@ -54,10 +64,10 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
       .reduce((acc, t) => acc + (t.total - t.paidAmount), 0);
 
     const grossProfitFromSales = sales.reduce((acc, s) => acc + (s.totalProfit || 0), 0);
-    const totalOperatingExpenses = expenses.reduce((acc, e) => acc + e.amount, 0) + 
-                                  salaries.reduce((acc, st) => acc + st.amount, 0);
+    const totalOperatingExpenses = expenses.reduce((acc, e) => acc + e.amount, 0);
+    const totalSalaries = salaries.reduce((acc, s) => acc + s.amount, 0);
     
-    const netProfit = grossProfitFromSales - totalOperatingExpenses;
+    const netProfit = grossProfitFromSales - totalOperatingExpenses - totalSalaries;
 
     // 2. Profit Breakdown Row
     const productRevenue = sales.reduce((acc, s) => acc + (s.subtotal - s.totalDiscount), 0);
@@ -105,7 +115,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
       productRevenue,
       cogs,
       deliveryIncome,
-      totalOperatingExpenses,
+      totalOperatingExpenses: totalOperatingExpenses + totalSalaries,
       chartData,
       maxSales,
       lowStockCount: lowStockItems.length,
@@ -118,11 +128,30 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
   return (
     <div className="p-8 space-y-10 max-w-7xl mx-auto text-start overflow-y-auto h-full scrollbar-thin pb-24">
       
+      {/* SHIFT BANNER */}
+      <div className={`w-full p-4 rounded-2xl flex items-center justify-between border shadow-sm ${activeShift ? 'bg-green-600/10 border-green-600/30 text-green-600' : 'bg-zinc-900 border-zinc-800 text-zinc-500'}`}>
+         <div className="flex items-center gap-3">
+            <UserCheck size={20} />
+            {activeShift ? (
+               <div>
+                  <p className="text-xs font-black uppercase tracking-widest">{lang === 'ar' ? 'الوردية نشطة' : 'Active Shift'}</p>
+                  <p className="text-[10px] font-bold mt-0.5">{activeShiftEmployee?.name} • {lang === 'ar' ? 'منذ' : 'Since'} {new Date(activeShift.startTime).toLocaleTimeString()}</p>
+               </div>
+            ) : (
+               <p className="text-xs font-black uppercase tracking-widest">{lang === 'ar' ? 'المحل مغلق (لا توجد وردية نشطة)' : 'Shop Closed (No Active Shift)'}</p>
+            )}
+         </div>
+         {activeShift && <div className="animate-pulse w-3 h-3 bg-green-500 rounded-full"></div>}
+      </div>
+
       {/* SECTION 1: THE MONEY (FINANCIAL TRUTH) */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         
         {/* NET CASH */}
-        <div className="bg-red-600 p-8 rounded-[40px] shadow-2xl shadow-red-900/40 relative overflow-hidden group border border-red-500">
+        <button 
+          onClick={() => setView('reports')}
+          className="bg-red-600 p-8 rounded-[40px] shadow-2xl shadow-red-900/40 relative overflow-hidden group border border-red-500 text-start hover:scale-[1.02] transition-transform"
+        >
           <div className="relative z-10">
              <div className="flex items-center gap-3 mb-6">
                 <div className="p-2.5 bg-white/20 text-white rounded-2xl"><Wallet size={20}/></div>
@@ -132,36 +161,45 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
              <p className="text-[9px] text-red-200 mt-2 uppercase font-black tracking-widest">{lang === 'ar' ? 'الموجود في الخزينة' : 'Actual Cash in Drawer'}</p>
           </div>
           <HandCoins size={100} className="absolute -bottom-6 -right-6 text-white/10 group-hover:scale-110 transition-transform duration-700" />
-        </div>
+        </button>
 
         {/* RECEIVABLES */}
-        <div className="bg-zinc-900 light:bg-white p-8 rounded-[40px] border border-zinc-800 light:border-zinc-200 shadow-xl relative overflow-hidden group">
+        <button 
+          onClick={() => setView('customers')}
+          className="bg-zinc-900 light:bg-white p-8 rounded-[40px] border border-zinc-800 light:border-zinc-200 shadow-xl relative overflow-hidden group text-start hover:scale-[1.02] transition-transform"
+        >
           <div className="relative z-10">
              <div className="flex items-center gap-3 mb-6">
                 <div className="p-2.5 bg-blue-600/10 text-blue-500 rounded-2xl"><ArrowUpRight size={20}/></div>
-                <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">{lang === 'ar' ? 'المديونيات (لينا)' : 'Receivables (Leena)'}</h4>
+                <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">{lang === 'ar' ? 'المديونيات (لينا)' : 'Receivables'}</h4>
              </div>
              <p className="text-4xl font-black text-zinc-100 light:text-zinc-900 tracking-tighter">{data.currency} {stats.receivables.toLocaleString()}</p>
              <p className="text-[9px] text-zinc-600 mt-2 uppercase font-black tracking-widest">{lang === 'ar' ? 'مستحقات عند العملاء' : 'Uncollected Revenue'}</p>
           </div>
           <TrendingUp size={100} className="absolute -bottom-6 -right-6 text-blue-500/5 group-hover:scale-110 transition-transform duration-700" />
-        </div>
+        </button>
 
         {/* PAYABLES */}
-        <div className="bg-zinc-900 light:bg-white p-8 rounded-[40px] border border-zinc-800 light:border-zinc-200 shadow-xl relative overflow-hidden group">
+        <button 
+          onClick={() => setView('wholesale')}
+          className="bg-zinc-900 light:bg-white p-8 rounded-[40px] border border-zinc-800 light:border-zinc-200 shadow-xl relative overflow-hidden group text-start hover:scale-[1.02] transition-transform"
+        >
           <div className="relative z-10">
              <div className="flex items-center gap-3 mb-6">
                 <div className="p-2.5 bg-orange-600/10 text-orange-500 rounded-2xl"><ArrowDownLeft size={20}/></div>
-                <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">{lang === 'ar' ? 'المستحقات (علينا)' : 'Payables (3alena)'}</h4>
+                <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">{lang === 'ar' ? 'المستحقات (علينا)' : 'Payables'}</h4>
              </div>
              <p className="text-4xl font-black text-zinc-100 light:text-zinc-900 tracking-tighter">{data.currency} {stats.payables.toLocaleString()}</p>
              <p className="text-[9px] text-zinc-600 mt-2 uppercase font-black tracking-widest">{lang === 'ar' ? 'ديون للموردين' : 'Supplier Obligations'}</p>
           </div>
           <Coins size={100} className="absolute -bottom-6 -right-6 text-orange-500/5 group-hover:scale-110 transition-transform duration-700" />
-        </div>
+        </button>
 
         {/* NET PROFIT */}
-        <div className="bg-zinc-900 light:bg-white p-8 rounded-[40px] border border-zinc-800 light:border-zinc-200 shadow-xl relative overflow-hidden group">
+        <button 
+          onClick={() => setView('reports')}
+          className="bg-zinc-900 light:bg-white p-8 rounded-[40px] border border-zinc-800 light:border-zinc-200 shadow-xl relative overflow-hidden group text-start hover:scale-[1.02] transition-transform"
+        >
           <div className="relative z-10">
              <div className="flex items-center gap-3 mb-6">
                 <div className="p-2.5 bg-emerald-600/10 text-emerald-500 rounded-2xl"><Zap size={20}/></div>
@@ -171,7 +209,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
              <p className="text-[9px] text-zinc-600 mt-2 uppercase font-black tracking-widest">{lang === 'ar' ? 'الربح بعد خصم التكاليف' : 'Bottom Line Revenue'}</p>
           </div>
           <Scale size={100} className="absolute -bottom-6 -right-6 text-emerald-500/5 group-hover:scale-110 transition-transform duration-700" />
-        </div>
+        </button>
       </div>
 
       {/* SECTION 2: PROFIT BREAKDOWN ROW */}
@@ -187,11 +225,11 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
         </div>
 
         {/* Card B: COGS */}
-        <div className="bg-zinc-900/50 light:bg-zinc-50 p-6 rounded-3xl border border-zinc-800 light:border-zinc-200 shadow-sm flex items-center gap-4">
+        <div onClick={() => setView('inventory')} className="bg-zinc-900/50 light:bg-zinc-50 p-6 rounded-3xl border border-zinc-800 light:border-zinc-200 shadow-sm flex items-center gap-4 cursor-pointer hover:bg-zinc-800 transition-colors">
            <div className="p-3 bg-zinc-800 light:bg-white rounded-xl text-zinc-400"><Package size={20}/></div>
            <div className="text-start">
-              <p className="text-[8px] font-black uppercase text-zinc-500 tracking-widest">{lang === 'ar' ? 'تكلفة المبيعات' : 'COGS'}</p>
-              <p className="text-lg font-black text-zinc-100 light:text-zinc-900 tracking-tight">{data.currency} {stats.cogs.toLocaleString()}</p>
+              <p className="text-[8px] font-black uppercase text-zinc-500 tracking-widest">{lang === 'ar' ? 'قيمة المخزون (شراء)' : 'Inventory Value'}</p>
+              <p className="text-lg font-black text-zinc-100 light:text-zinc-900 tracking-tight">{data.currency} {data.products.reduce((acc, p) => acc + (p.costPrice * p.stock), 0).toLocaleString()}</p>
            </div>
         </div>
 

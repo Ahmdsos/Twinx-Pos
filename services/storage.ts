@@ -10,7 +10,6 @@ export const storageService = {
       try {
         const parsed = JSON.parse(saved);
         // Ensure all AppData fields are present after parsing including new HR modules
-        // Fix: Added categories and stockLogs to satisfy AppData interface
         return {
           products: parsed.products || [],
           sales: parsed.sales || [],
@@ -25,6 +24,7 @@ export const storageService = {
           employees: parsed.employees || [],
           attendance: parsed.attendance || [],
           salaryTransactions: parsed.salaryTransactions || [],
+          shifts: parsed.shifts || [],
           categories: parsed.categories || [],
           stockLogs: parsed.stockLogs || [],
           initialCash: parsed.initialCash || 0,
@@ -37,7 +37,6 @@ export const storageService = {
       }
     }
     // Default initial data structure
-    // Fix: Added categories and stockLogs to default state
     return {
       products: [],
       sales: [],
@@ -52,6 +51,7 @@ export const storageService = {
       employees: [],
       attendance: [],
       salaryTransactions: [],
+      shifts: [],
       categories: [],
       stockLogs: [],
       initialCash: 0,
@@ -99,6 +99,7 @@ export const storageService = {
             if (!data.employees) data.employees = [];
             if (!data.attendance) data.attendance = [];
             if (!data.salaryTransactions) data.salaryTransactions = [];
+            if (!data.shifts) data.shifts = [];
             if (!data.categories) data.categories = [];
             if (!data.stockLogs) data.stockLogs = [];
             resolve(data);

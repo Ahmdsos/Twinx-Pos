@@ -5,12 +5,10 @@ import {
   Download, 
   Upload, 
   DollarSign, 
-  Database, 
-  RefreshCcw, 
-  Clock, 
-  ChevronRight, 
-  ShieldAlert,
-  Coins
+  ShieldAlert, 
+  ChevronRight,
+  UserCog,
+  Database
 } from 'lucide-react';
 import { storageService } from '../services/storage';
 import { translations, Language } from '../translations';
@@ -46,8 +44,7 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ data, updateData, setDa
   };
 
   const handleReset = () => {
-    if (confirm(lang === 'ar' ? 'خطر: سيتم مسح كافة البيانات نهائياً!' : 'DANGER: All data will be wiped permanently!')) {
-      // Fix: Added missing properties (employees, attendance, salaryTransactions, categories, stockLogs) to reset logic
+    if (confirm(lang === 'ar' ? 'تحذير: سيتم مسح كافة البيانات (مبيعات، موظفين، مخزون، إعدادات). هل أنت متأكد تماماً؟' : 'WARNING: This will wipe ALL data (Sales, Staff, Inventory, Settings). Are you absolutely sure?')) {
       const resetData: AppData = { 
         products: [], 
         sales: [], 
@@ -61,6 +58,7 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ data, updateData, setDa
         employees: [],
         attendance: [],
         salaryTransactions: [],
+        shifts: [],
         categories: [],
         stockLogs: [],
         logs: [], 
@@ -70,6 +68,7 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ data, updateData, setDa
       };
       setData(resetData);
       storageService.saveData(resetData);
+      addLog({ action: 'FACTORY_RESET', category: 'system', details: 'System reset to factory settings' });
     }
   };
 
@@ -85,10 +84,11 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ data, updateData, setDa
   return (
     <div className="p-8 max-w-5xl mx-auto space-y-10 pb-24 text-start">
       <header>
-        <h3 className="text-3xl font-black tracking-tighter uppercase text-zinc-100 mb-2">{t.sys_admin}</h3>
+        <h3 className="text-3xl font-black tracking-tighter uppercase text-zinc-100 light:text-zinc-900 mb-2">{t.sys_admin}</h3>
         <p className="text-sm text-zinc-500 font-medium">{lang === 'ar' ? 'إدارة قواعد البيانات المحلية وتكوين منطق البيع' : 'Manage local database and configure logic'}</p>
       </header>
 
+      {/* SECTION 1: OPS & CURRENCY */}
       <section className="bg-zinc-950 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-[40px] overflow-hidden backdrop-blur-md">
         <div className="p-8 border-b border-zinc-800 light:border-zinc-200 bg-black/20 light:bg-zinc-50 flex items-center gap-3">
           <div className="p-2 bg-red-600 rounded-xl"><DollarSign size={20} className="text-white" /></div>
@@ -120,15 +120,19 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ data, updateData, setDa
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+        {/* SECTION 2: DATA & BACKUP */}
         <section className="bg-zinc-950 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-[40px] overflow-hidden">
           <div className="p-8 border-b border-zinc-800 light:border-zinc-200 bg-black/20 light:bg-zinc-50 flex justify-between items-center">
-            <h4 className="text-xl font-bold light:text-zinc-900">{lang === 'ar' ? 'النسخ الاحتياطي' : 'Data Backup'}</h4>
+            <div className="flex items-center gap-3">
+               <Database size={20} className="text-blue-500"/>
+               <h4 className="text-xl font-bold light:text-zinc-900">{lang === 'ar' ? 'البيانات' : 'Data Management'}</h4>
+            </div>
             <span className="text-[10px] font-black uppercase text-zinc-500 light:text-zinc-400">{t.last_backup}: {data.lastBackupTimestamp ? new Date(data.lastBackupTimestamp).toLocaleDateString(lang === 'ar' ? 'ar-EG' : 'en-US') : '---'}</span>
           </div>
           <div className="p-8 space-y-4">
-            <button onClick={handleExport} className="w-full flex items-center justify-between p-6 bg-zinc-900/40 light:bg-zinc-50 hover:bg-red-600 rounded-3xl transition-all group border border-zinc-800 light:border-zinc-200">
+            <button onClick={handleExport} className="w-full flex items-center justify-between p-6 bg-zinc-900/40 light:bg-zinc-50 hover:bg-blue-600 rounded-3xl transition-all group border border-zinc-800 light:border-zinc-200">
               <div className="flex items-center gap-4">
-                <Download className="text-red-500 group-hover:text-white" />
+                <Download className="text-blue-500 group-hover:text-white" />
                 <span className="font-bold light:text-zinc-900 group-hover:text-white">{t.generate_backup}</span>
               </div>
               <ChevronRight className="text-zinc-600 group-hover:text-white" />
@@ -137,7 +141,7 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ data, updateData, setDa
               <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleImport} />
               <button onClick={() => fileInputRef.current?.click()} className="w-full flex items-center justify-between p-6 bg-zinc-900/40 light:bg-zinc-50 hover:bg-zinc-800 light:hover:bg-zinc-100 rounded-3xl transition-all group border border-zinc-800 light:border-zinc-200">
                 <div className="flex items-center gap-4">
-                  <Upload className="text-blue-500" />
+                  <Upload className="text-zinc-500" />
                   <span className="font-bold light:text-zinc-900">{t.restore_ledger}</span>
                 </div>
                 <ChevronRight className="text-zinc-600" />
@@ -146,12 +150,28 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ data, updateData, setDa
           </div>
         </section>
 
-        <section className="bg-zinc-950 light:bg-white border border-red-900/20 light:border-red-600/20 rounded-[40px] overflow-hidden p-12 text-center flex flex-col items-center justify-center">
-            <ShieldAlert size={48} className="text-red-600 mb-6" />
-            <h4 className="text-xl font-black mb-4 uppercase light:text-zinc-900">{t.factory_reset}</h4>
-            <p className="text-xs text-zinc-500 light:text-zinc-600 mb-8">{lang === 'ar' ? 'سيتم حذف كل شيء نهائياً من هذا الجهاز.' : 'All local data will be permanently deleted.'}</p>
-            <button onClick={handleReset} className="w-full py-6 bg-red-600/10 border border-red-600/50 text-red-600 hover:bg-red-600 hover:text-white font-black rounded-3xl transition-all">{lang === 'ar' ? 'تأكيد الحذف النهائي' : 'Confirm Wipe'}</button>
-        </section>
+        {/* SECTION 3: ROLE MANAGEMENT & RESET */}
+        <div className="space-y-6">
+            <section className="bg-zinc-950 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-[40px] overflow-hidden p-8">
+               <div className="flex items-center gap-3 mb-4">
+                  <UserCog size={20} className="text-orange-500"/>
+                  <h4 className="text-lg font-bold light:text-zinc-900">{lang === 'ar' ? 'إدارة الصلاحيات' : 'Role Management'}</h4>
+               </div>
+               <p className="text-xs text-zinc-500 mb-6">{lang === 'ar' ? 'صلاحيات المسؤول تتيح الوصول الكامل. الكاشير محدود بالمبيعات والمخزون.' : 'Admin role grants full access. Cashier is limited to Sales & Inventory.'}</p>
+               <div className="flex gap-2">
+                  <div className="px-4 py-2 bg-zinc-900 light:bg-zinc-100 rounded-xl border border-zinc-800 light:border-zinc-200 text-[10px] font-black uppercase text-zinc-500 flex-1 text-center">Admin (Full)</div>
+                  <div className="px-4 py-2 bg-zinc-900 light:bg-zinc-100 rounded-xl border border-zinc-800 light:border-zinc-200 text-[10px] font-black uppercase text-zinc-500 flex-1 text-center">Cashier (POS)</div>
+                  <div className="px-4 py-2 bg-zinc-900 light:bg-zinc-100 rounded-xl border border-zinc-800 light:border-zinc-200 text-[10px] font-black uppercase text-zinc-500 flex-1 text-center">Delivery (Orders)</div>
+               </div>
+            </section>
+
+            <section className="bg-red-950/20 light:bg-red-50 border border-red-900/30 light:border-red-200 rounded-[40px] overflow-hidden p-8 text-center flex flex-col items-center justify-center">
+                <ShieldAlert size={32} className="text-red-600 mb-4" />
+                <h4 className="text-lg font-black mb-2 uppercase light:text-zinc-900">{t.factory_reset}</h4>
+                <p className="text-[10px] text-zinc-500 light:text-zinc-600 mb-6 font-bold uppercase">{lang === 'ar' ? 'تحذير: منطقة خطر' : 'Danger Zone'}</p>
+                <button onClick={handleReset} className="w-full py-4 bg-red-600 text-white font-black rounded-2xl transition-all hover:bg-red-700 shadow-lg shadow-red-900/20 text-xs uppercase tracking-widest">{lang === 'ar' ? 'مسح كافة البيانات' : 'Wipe Database'}</button>
+            </section>
+        </div>
       </div>
     </div>
   );

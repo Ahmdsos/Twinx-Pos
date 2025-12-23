@@ -18,7 +18,7 @@ export interface Product {
 
 export interface CartItem extends Product {
   quantity: number;
-  returnedQuantity?: number;
+  returnedQuantity?: number; // Critical for avoiding infinite return bug
   discount?: number;
   discountType?: 'percentage' | 'fixed';
 }
@@ -49,7 +49,10 @@ export interface Employee {
   name: string;
   phone: string;
   role: Role;
+  nationalId?: string; // New: For HR compliance
+  address?: string; // New: For HR records
   baseSalary: number;
+  permissions: string[]; // New: Granular access control
   joinDate: string;
   isActive: boolean;
   notes?: string;
@@ -67,6 +70,18 @@ export interface Attendance {
   checkOut?: number;
   breaks: { start: number; end?: number }[];
   status: 'present' | 'on_break' | 'completed' | 'late' | 'absent';
+}
+
+export interface Shift {
+  id: string;
+  cashierId: string; // Links to Employee
+  startTime: number;
+  endTime?: number;
+  startCash: number;
+  endCash?: number; // Calculated system total
+  actualEndCash?: number; // Physical cash counted by cashier
+  status: 'open' | 'closed';
+  notes?: string;
 }
 
 export interface SalaryTransaction {
@@ -111,6 +126,7 @@ export interface Sale {
   totalProfit: number; // Financial Pro
   pointsEarned: number; // Loyalty Pro
   status?: 'pending' | 'delivered' | 'cancelled' | 'completed';
+  shiftId?: string; // Link sale to a specific shift
 }
 
 export interface DraftInvoice {
@@ -140,6 +156,7 @@ export interface SaleReturn {
   items: ReturnItem[];
   totalRefund: number;
   customerName?: string;
+  shiftId?: string; // Link return to a specific shift
 }
 
 export interface Expense {
@@ -147,7 +164,8 @@ export interface Expense {
   description: string;
   amount: number;
   timestamp: number;
-  employeeId?: string;
+  employeeId?: string; // For linking salary expenses
+  shiftId?: string; // Link expense to a specific shift
 }
 
 export interface LogEntry {
@@ -155,7 +173,7 @@ export interface LogEntry {
   timestamp: number;
   action: string;
   details: string;
-  category: 'sale' | 'inventory' | 'expense' | 'return' | 'system' | 'cash' | 'wholesale' | 'delivery' | 'hr';
+  category: 'sale' | 'inventory' | 'expense' | 'return' | 'system' | 'cash' | 'wholesale' | 'delivery' | 'hr' | 'shift';
 }
 
 export interface WholesalePartner {
@@ -202,6 +220,7 @@ export interface AppData {
   employees: Employee[];
   attendance: Attendance[];
   salaryTransactions: SalaryTransaction[];
+  shifts: Shift[]; // New Shift Management
   categories: string[];
   stockLogs: StockLog[];
   initialCash: number;
@@ -210,4 +229,4 @@ export interface AppData {
   currency?: string;
 }
 
-export type ViewType = 'dashboard' | 'sales' | 'inventory' | 'expenses' | 'intelligence' | 'settings' | 'returns' | 'reports' | 'logs' | 'wholesale' | 'delivery' | 'customers' | 'hr';
+export type ViewType = 'dashboard' | 'sales' | 'inventory' | 'expenses' | 'intelligence' | 'settings' | 'returns' | 'reports' | 'logs' | 'wholesale' | 'delivery' | 'customers' | 'hr' | 'shifts';

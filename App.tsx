@@ -51,6 +51,9 @@ const App: React.FC = () => {
   // TWINX INTEGRITY: Track selected ID instead of object to ensure reactivity
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   
+  // Re-Order State (Navigation from Delivery to Sales)
+  const [reorderSale, setReorderSale] = useState<Sale | null>(null);
+  
   const [data, setData] = useState<AppData>({
     products: [],
     sales: [],
@@ -65,6 +68,7 @@ const App: React.FC = () => {
     employees: [],
     attendance: [],
     salaryTransactions: [],
+    shifts: [],
     categories: [],
     stockLogs: [],
     initialCash: 0,
@@ -115,6 +119,7 @@ const App: React.FC = () => {
       employees: loadedData.employees || [],
       attendance: loadedData.attendance || [],
       salaryTransactions: loadedData.salaryTransactions || [],
+      shifts: loadedData.shifts || [],
       categories: loadedData.categories || [],
       stockLogs: loadedData.stockLogs || [],
       currency: loadedData.currency || 'EGP'
@@ -170,7 +175,14 @@ const App: React.FC = () => {
       case 'dashboard':
         return <Dashboard data={data} lang={lang} setView={setView} onSelectSale={setSaleId} cashBalance={cashBalance} />;
       case 'sales':
-        return <SalesScreen data={data} updateData={updateData} addLog={addLog} lang={lang} />;
+        return <SalesScreen 
+          data={data} 
+          updateData={updateData} 
+          addLog={addLog} 
+          lang={lang} 
+          reorderSale={reorderSale}
+          onClearReorder={() => setReorderSale(null)}
+        />;
       case 'inventory':
         return <InventoryScreen data={data} updateData={updateData} addLog={addLog} lang={lang} />;
       case 'expenses':
@@ -186,7 +198,14 @@ const App: React.FC = () => {
       case 'wholesale':
         return <WholesaleScreen data={data} updateData={updateData} addLog={addLog} lang={lang} />;
       case 'delivery':
-        return <DeliveryScreen data={data} updateData={updateData} addLog={addLog} lang={lang} onSelectSale={setSaleId} />;
+        return <DeliveryScreen 
+          data={data} 
+          updateData={updateData} 
+          addLog={addLog} 
+          lang={lang} 
+          onSelectSale={setSaleId} 
+          onReorder={(sale) => { setReorderSale(sale); setView('sales'); }}
+        />;
       case 'customers':
         return <CustomersScreen data={data} updateData={updateData} addLog={addLog} lang={lang} onSelectSale={setSaleId} />;
       case 'hr':
