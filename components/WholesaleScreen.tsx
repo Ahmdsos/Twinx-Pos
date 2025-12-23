@@ -19,7 +19,8 @@ import {
   AlertCircle,
   Coins,
   CheckCircle2,
-  Clock
+  Clock,
+  PieChart
 } from 'lucide-react';
 
 interface WholesaleScreenProps {
@@ -65,6 +66,15 @@ const WholesaleScreen: React.FC<WholesaleScreenProps> = ({ data, updateData, add
       return matchesType && matchesSearch;
     });
   }, [data.partners, partnerFilter, searchTerm]);
+
+  const partnerAggregates = useMemo(() => {
+    if (!selectedPartner) return null;
+    const transactions = (data.wholesaleTransactions || []).filter(t => t.partnerId === selectedPartner.id);
+    const totalTransactions = transactions.reduce((acc, t) => acc + t.total, 0);
+    const totalPaid = transactions.reduce((acc, t) => acc + t.paidAmount, 0);
+    const totalDue = totalTransactions - totalPaid;
+    return { totalTransactions, totalPaid, totalDue, count: transactions.length };
+  }, [selectedPartner, data.wholesaleTransactions]);
 
   const savePartner = () => {
     if (!partnerForm.name) return;
@@ -295,6 +305,24 @@ const WholesaleScreen: React.FC<WholesaleScreenProps> = ({ data, updateData, add
                   </button>
                 </div>
               </div>
+
+              {/* PARTNER AGGREGATE SNAPSHOT CARD */}
+              {partnerAggregates && (
+                <div className="p-8 bg-black/10 light:bg-zinc-100/50 border-b border-zinc-800/50 light:border-zinc-200 shrink-0 grid grid-cols-3 gap-4">
+                   <div className="bg-zinc-950 light:bg-white p-4 rounded-2xl border border-zinc-800 light:border-zinc-200">
+                      <p className="text-[9px] font-black uppercase text-zinc-500">{lang === 'ar' ? 'إجمالي التعاملات' : 'Total Volume'}</p>
+                      <p className="text-xl font-black text-zinc-100 light:text-zinc-900">{data.currency} {partnerAggregates.totalTransactions.toLocaleString()}</p>
+                   </div>
+                   <div className="bg-zinc-950 light:bg-white p-4 rounded-2xl border border-zinc-800 light:border-zinc-200">
+                      <p className="text-[9px] font-black uppercase text-zinc-500">{lang === 'ar' ? 'إجمالي المدفوع' : 'Total Settled'}</p>
+                      <p className="text-xl font-black text-green-500">{data.currency} {partnerAggregates.totalPaid.toLocaleString()}</p>
+                   </div>
+                   <div className="bg-zinc-950 light:bg-white p-4 rounded-2xl border border-zinc-800 light:border-zinc-200">
+                      <p className="text-[9px] font-black uppercase text-zinc-500">{lang === 'ar' ? 'الرصيد المتبقي' : 'Outstanding Balance'}</p>
+                      <p className={`text-xl font-black ${partnerAggregates.totalDue > 0 ? 'text-red-500' : 'text-zinc-500'}`}>{data.currency} {partnerAggregates.totalDue.toLocaleString()}</p>
+                   </div>
+                </div>
+              )}
 
               <div className="flex-1 overflow-y-auto p-8 space-y-6 scrollbar-thin">
                 <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2">

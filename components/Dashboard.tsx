@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { AppData, Sale, ViewType, Product } from '../types';
+import { AppData, Sale, ViewType, Product, Expense, SalaryTransaction } from '../types';
 import { 
   TrendingUp, 
   AlertCircle, 
@@ -20,29 +20,46 @@ import {
   Wallet,
   HandCoins,
   Scale,
-  UserCheck
+  Lock,
+  Unlock,
+  Eye,
+  FileText
 } from 'lucide-react';
 import { translations, Language } from '../translations';
+import { TwinXOps } from '../services/operations';
 
 interface DashboardProps {
   data: AppData;
+  updateData: (newData: Partial<AppData>) => void;
   lang: Language;
   setView: (view: ViewType) => void;
   onSelectSale: (sale: Sale) => void;
   cashBalance: number;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale, cashBalance }) => {
+type DrillDownType = 'net_cash' | 'receivables' | 'payables' | 'net_profit' | 'inventory_alerts';
+
+const Dashboard: React.FC<DashboardProps> = ({ data, updateData, lang, setView, onSelectSale, cashBalance }) => {
   const t = translations[lang];
-  const [detailModal, setDetailModal] = useState<'alerts' | null>(null);
+  const [drillDown, setDrillDown] = useState<DrillDownType | null>(null);
+  const [showShiftModal, setShowShiftModal] = useState<'open' | 'close' | null>(null);
+  const [shiftAmount, setShiftAmount] = useState<number>(0);
 
-  const activeShift = useMemo(() => {
-    return data.shifts.find(s => s.status === 'open');
-  }, [data.shifts]);
+  const activeShift = useMemo(() => data.shifts.find(s => s.status === 'open'), [data.shifts]);
 
-  const activeShiftEmployee = useMemo(() => {
-    return activeShift ? data.employees.find(e => e.id === activeShift.cashierId) : null;
-  }, [activeShift, data.employees]);
+  const handleShiftAction = () => {
+     try {
+       if (showShiftModal === 'open') {
+         updateData(TwinXOps.openShift(data, shiftAmount, 'Admin')); 
+       } else {
+         updateData(TwinXOps.closeShift(data, shiftAmount, 'Shift Closed via Dashboard'));
+       }
+       setShowShiftModal(null);
+       setShiftAmount(0);
+     } catch (err: any) {
+       alert(err.message);
+     }
+  };
 
   const stats = useMemo(() => {
     const sales = data?.sales || [];
@@ -52,7 +69,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
     const products = data?.products || [];
 
     // 1. Core Financials (Money Section)
-    const totalRetailReceivables = sales.reduce((acc, s) => acc + (s.remainingAmount || 0), 0);
+    const totalRetailReceivables = sales.reduce((acc, s) => acc + (s.status !== 'cancelled' ? (s.remainingAmount || 0) : 0), 0);
     const totalWholesaleReceivables = wholesale
       .filter(t => t.type === 'sale')
       .reduce((acc, t) => acc + (t.total - t.paidAmount), 0);
@@ -63,16 +80,19 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
       .filter(t => t.type === 'purchase')
       .reduce((acc, t) => acc + (t.total - t.paidAmount), 0);
 
-    const grossProfitFromSales = sales.reduce((acc, s) => acc + (s.totalProfit || 0), 0);
-    const totalOperatingExpenses = expenses.reduce((acc, e) => acc + e.amount, 0);
-    const totalSalaries = salaries.reduce((acc, s) => acc + s.amount, 0);
+    // NET PROFIT CALCULATION (Corrected: Don't subtract Salary twice)
+    // Formula: (Retail Sales Revenue + Delivery Income) - (COGS) - (Expenses) - (Salaries) - (Returns)
+    const productRevenue = sales.reduce((acc, s) => acc + (s.status !== 'cancelled' ? (s.subtotal - s.totalDiscount) : 0), 0);
+    const deliveryIncome = sales.reduce((acc, s) => acc + (s.status !== 'cancelled' ? (s.deliveryFee || 0) : 0), 0);
+    const cogs = sales.reduce((acc, s) => acc + (s.status !== 'cancelled' ? (s.totalCost || 0) : 0), 0);
     
-    const netProfit = grossProfitFromSales - totalOperatingExpenses - totalSalaries;
+    const totalExpenses = expenses.reduce((acc, e) => acc + e.amount, 0);
+    const totalSalaries = salaries.reduce((acc, s) => acc + s.amount, 0);
+    const totalReturns = (data.returns || []).reduce((acc, r) => acc + r.totalRefund, 0);
 
-    // 2. Profit Breakdown Row
-    const productRevenue = sales.reduce((acc, s) => acc + (s.subtotal - s.totalDiscount), 0);
-    const cogs = sales.reduce((acc, s) => acc + (s.totalCost || 0), 0);
-    const deliveryIncome = sales.reduce((acc, s) => acc + (s.deliveryFee || 0), 0);
+    const netProfit = (productRevenue + deliveryIncome) - cogs - totalExpenses - totalSalaries - totalReturns;
+
+    const totalOperatingExpenses = totalExpenses + totalSalaries; // Used for Expense Card display
 
     // 3. 7-Day Trend Logic
     const last7Days = [...Array(7)].map((_, i) => {
@@ -86,7 +106,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
       const daySales = sales.filter(s => {
         const sDate = new Date(s.timestamp);
         sDate.setHours(0,0,0,0);
-        return sDate.getTime() === day.getTime();
+        return sDate.getTime() === day.getTime() && s.status !== 'cancelled';
       });
       return { 
         label: day.toLocaleDateString(lang, { weekday: 'short' }),
@@ -115,7 +135,10 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
       productRevenue,
       cogs,
       deliveryIncome,
-      totalOperatingExpenses: totalOperatingExpenses + totalSalaries,
+      totalOperatingExpenses,
+      totalExpenses, // Raw expenses
+      totalSalaries, // Raw salaries
+      totalReturns,
       chartData,
       maxSales,
       lowStockCount: lowStockItems.length,
@@ -128,50 +151,38 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
   return (
     <div className="p-8 space-y-10 max-w-7xl mx-auto text-start overflow-y-auto h-full scrollbar-thin pb-24">
       
-      {/* SHIFT BANNER */}
-      <div className={`w-full p-4 rounded-2xl flex items-center justify-between border shadow-sm ${activeShift ? 'bg-green-600/10 border-green-600/30 text-green-600' : 'bg-zinc-900 border-zinc-800 text-zinc-500'}`}>
-         <div className="flex items-center gap-3">
-            <UserCheck size={20} />
-            {activeShift ? (
-               <div>
-                  <p className="text-xs font-black uppercase tracking-widest">{lang === 'ar' ? 'الوردية نشطة' : 'Active Shift'}</p>
-                  <p className="text-[10px] font-bold mt-0.5">{activeShiftEmployee?.name} • {lang === 'ar' ? 'منذ' : 'Since'} {new Date(activeShift.startTime).toLocaleTimeString()}</p>
-               </div>
-            ) : (
-               <p className="text-xs font-black uppercase tracking-widest">{lang === 'ar' ? 'المحل مغلق (لا توجد وردية نشطة)' : 'Shop Closed (No Active Shift)'}</p>
-            )}
-         </div>
-         {activeShift && <div className="animate-pulse w-3 h-3 bg-green-500 rounded-full"></div>}
-      </div>
-
       {/* SECTION 1: THE MONEY (FINANCIAL TRUTH) */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         
-        {/* NET CASH */}
-        <button 
-          onClick={() => setView('reports')}
-          className="bg-red-600 p-8 rounded-[40px] shadow-2xl shadow-red-900/40 relative overflow-hidden group border border-red-500 text-start hover:scale-[1.02] transition-transform"
-        >
-          <div className="relative z-10">
-             <div className="flex items-center gap-3 mb-6">
-                <div className="p-2.5 bg-white/20 text-white rounded-2xl"><Wallet size={20}/></div>
-                <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-red-100">{lang === 'ar' ? 'السيولة (كاش)' : 'Net Cash'}</h4>
+        {/* SHIFT / NET CASH */}
+        <div className="bg-red-600 p-8 rounded-[40px] shadow-2xl shadow-red-900/40 relative overflow-hidden group border border-red-500">
+           <div className="relative z-10">
+             <div className="flex justify-between items-start mb-6">
+                <div className="flex items-center gap-3">
+                   <div className="p-2.5 bg-white/20 text-white rounded-2xl"><Wallet size={20}/></div>
+                   <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-red-100">{lang === 'ar' ? 'السيولة (كاش)' : 'Net Cash'}</h4>
+                </div>
+                <button 
+                  onClick={() => setShowShiftModal(activeShift ? 'close' : 'open')}
+                  className="px-3 py-1 bg-black/20 hover:bg-black/40 text-white rounded-lg text-[9px] font-black uppercase tracking-widest flex items-center gap-2 transition-colors"
+                >
+                  {activeShift ? <><Lock size={10}/> {lang === 'ar' ? 'إغلاق الوردية' : 'Close Shift'}</> : <><Unlock size={10}/> {lang === 'ar' ? 'فتح وردية' : 'Open Shift'}</>}
+                </button>
              </div>
-             <p className="text-4xl font-black text-white tracking-tighter">{data.currency} {cashBalance.toLocaleString()}</p>
-             <p className="text-[9px] text-red-200 mt-2 uppercase font-black tracking-widest">{lang === 'ar' ? 'الموجود في الخزينة' : 'Actual Cash in Drawer'}</p>
-          </div>
-          <HandCoins size={100} className="absolute -bottom-6 -right-6 text-white/10 group-hover:scale-110 transition-transform duration-700" />
-        </button>
+             <p className="text-4xl font-black text-white tracking-tighter cursor-pointer" onClick={() => setDrillDown('net_cash')}>{data.currency} {cashBalance.toLocaleString()}</p>
+             <p className="text-[9px] text-red-200 mt-2 uppercase font-black tracking-widest">
+               {activeShift ? (lang === 'ar' ? `وردية مفتوحة: ${new Date(activeShift.startTime).toLocaleTimeString()}` : `Shift Open: ${new Date(activeShift.startTime).toLocaleTimeString()}`) : (lang === 'ar' ? 'الوردية مغلقة' : 'Shift Closed')}
+             </p>
+           </div>
+           <HandCoins size={100} className="absolute -bottom-6 -right-6 text-white/10 group-hover:scale-110 transition-transform duration-700" />
+        </div>
 
         {/* RECEIVABLES */}
-        <button 
-          onClick={() => setView('customers')}
-          className="bg-zinc-900 light:bg-white p-8 rounded-[40px] border border-zinc-800 light:border-zinc-200 shadow-xl relative overflow-hidden group text-start hover:scale-[1.02] transition-transform"
-        >
+        <button onClick={() => setDrillDown('receivables')} className="bg-zinc-900 light:bg-white p-8 rounded-[40px] border border-zinc-800 light:border-zinc-200 shadow-xl relative overflow-hidden group text-start hover:scale-[1.02] transition-transform">
           <div className="relative z-10">
              <div className="flex items-center gap-3 mb-6">
                 <div className="p-2.5 bg-blue-600/10 text-blue-500 rounded-2xl"><ArrowUpRight size={20}/></div>
-                <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">{lang === 'ar' ? 'المديونيات (لينا)' : 'Receivables'}</h4>
+                <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">{lang === 'ar' ? 'المديونيات (لينا)' : 'Receivables (Leena)'}</h4>
              </div>
              <p className="text-4xl font-black text-zinc-100 light:text-zinc-900 tracking-tighter">{data.currency} {stats.receivables.toLocaleString()}</p>
              <p className="text-[9px] text-zinc-600 mt-2 uppercase font-black tracking-widest">{lang === 'ar' ? 'مستحقات عند العملاء' : 'Uncollected Revenue'}</p>
@@ -180,14 +191,11 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
         </button>
 
         {/* PAYABLES */}
-        <button 
-          onClick={() => setView('wholesale')}
-          className="bg-zinc-900 light:bg-white p-8 rounded-[40px] border border-zinc-800 light:border-zinc-200 shadow-xl relative overflow-hidden group text-start hover:scale-[1.02] transition-transform"
-        >
+        <button onClick={() => setDrillDown('payables')} className="bg-zinc-900 light:bg-white p-8 rounded-[40px] border border-zinc-800 light:border-zinc-200 shadow-xl relative overflow-hidden group text-start hover:scale-[1.02] transition-transform">
           <div className="relative z-10">
              <div className="flex items-center gap-3 mb-6">
                 <div className="p-2.5 bg-orange-600/10 text-orange-500 rounded-2xl"><ArrowDownLeft size={20}/></div>
-                <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">{lang === 'ar' ? 'المستحقات (علينا)' : 'Payables'}</h4>
+                <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">{lang === 'ar' ? 'المستحقات (علينا)' : 'Payables (3alena)'}</h4>
              </div>
              <p className="text-4xl font-black text-zinc-100 light:text-zinc-900 tracking-tighter">{data.currency} {stats.payables.toLocaleString()}</p>
              <p className="text-[9px] text-zinc-600 mt-2 uppercase font-black tracking-widest">{lang === 'ar' ? 'ديون للموردين' : 'Supplier Obligations'}</p>
@@ -195,11 +203,8 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
           <Coins size={100} className="absolute -bottom-6 -right-6 text-orange-500/5 group-hover:scale-110 transition-transform duration-700" />
         </button>
 
-        {/* NET PROFIT */}
-        <button 
-          onClick={() => setView('reports')}
-          className="bg-zinc-900 light:bg-white p-8 rounded-[40px] border border-zinc-800 light:border-zinc-200 shadow-xl relative overflow-hidden group text-start hover:scale-[1.02] transition-transform"
-        >
+        {/* NET PROFIT (Detailed Drill Down) */}
+        <button onClick={() => setDrillDown('net_profit')} className="bg-zinc-900 light:bg-white p-8 rounded-[40px] border border-zinc-800 light:border-zinc-200 shadow-xl relative overflow-hidden group text-start hover:scale-[1.02] transition-transform">
           <div className="relative z-10">
              <div className="flex items-center gap-3 mb-6">
                 <div className="p-2.5 bg-emerald-600/10 text-emerald-500 rounded-2xl"><Zap size={20}/></div>
@@ -225,11 +230,11 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
         </div>
 
         {/* Card B: COGS */}
-        <div onClick={() => setView('inventory')} className="bg-zinc-900/50 light:bg-zinc-50 p-6 rounded-3xl border border-zinc-800 light:border-zinc-200 shadow-sm flex items-center gap-4 cursor-pointer hover:bg-zinc-800 transition-colors">
+        <div className="bg-zinc-900/50 light:bg-zinc-50 p-6 rounded-3xl border border-zinc-800 light:border-zinc-200 shadow-sm flex items-center gap-4">
            <div className="p-3 bg-zinc-800 light:bg-white rounded-xl text-zinc-400"><Package size={20}/></div>
            <div className="text-start">
-              <p className="text-[8px] font-black uppercase text-zinc-500 tracking-widest">{lang === 'ar' ? 'قيمة المخزون (شراء)' : 'Inventory Value'}</p>
-              <p className="text-lg font-black text-zinc-100 light:text-zinc-900 tracking-tight">{data.currency} {data.products.reduce((acc, p) => acc + (p.costPrice * p.stock), 0).toLocaleString()}</p>
+              <p className="text-[8px] font-black uppercase text-zinc-500 tracking-widest">{lang === 'ar' ? 'تكلفة المبيعات' : 'COGS'}</p>
+              <p className="text-lg font-black text-zinc-100 light:text-zinc-900 tracking-tight">{data.currency} {stats.cogs.toLocaleString()}</p>
            </div>
         </div>
 
@@ -243,10 +248,10 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
         </div>
 
         {/* Card D: Total Expenses */}
-        <div className="bg-zinc-900/50 light:bg-zinc-50 p-6 rounded-3xl border border-zinc-800 light:border-zinc-200 shadow-sm flex items-center gap-4">
+        <div onClick={() => setDrillDown('net_profit')} className="bg-zinc-900/50 light:bg-zinc-50 p-6 rounded-3xl border border-zinc-800 light:border-zinc-200 shadow-sm flex items-center gap-4 cursor-pointer hover:bg-zinc-800/50 light:hover:bg-zinc-100 transition-colors">
            <div className="p-3 bg-zinc-800 light:bg-white rounded-xl text-zinc-400"><Receipt size={20}/></div>
            <div className="text-start">
-              <p className="text-[8px] font-black uppercase text-zinc-500 tracking-widest">{t.expenses}</p>
+              <p className="text-[8px] font-black uppercase text-zinc-500 tracking-widest">{t.expenses} (Click)</p>
               <p className="text-lg font-black text-orange-500 tracking-tight">{data.currency} {stats.totalOperatingExpenses.toLocaleString()}</p>
            </div>
         </div>
@@ -290,7 +295,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
         <div className="flex flex-col gap-6">
            {/* Low Stock Alert */}
            <button 
-             onClick={() => setDetailModal('alerts')}
+             onClick={() => setDrillDown('inventory_alerts')}
              className={`flex-1 p-8 rounded-[40px] border text-start transition-all group ${stats.lowStockCount > 0 ? 'bg-orange-600/10 border-orange-500 shadow-lg shadow-orange-900/10' : 'bg-zinc-900 light:bg-white border-zinc-800 light:border-zinc-200 shadow-xl'}`}
            >
               <div className="flex justify-between items-center mb-6">
@@ -303,7 +308,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
 
            {/* Expiry Alert */}
            <button 
-             onClick={() => setDetailModal('alerts')}
+             onClick={() => setDrillDown('inventory_alerts')}
              className={`flex-1 p-8 rounded-[40px] border text-start transition-all group ${stats.expiringCount > 0 ? 'bg-red-600/10 border-red-500 shadow-lg shadow-red-900/10' : 'bg-zinc-900 light:bg-white border-zinc-800 light:border-zinc-200 shadow-xl'}`}
            >
               <div className="flex justify-between items-center mb-6">
@@ -316,96 +321,120 @@ const Dashboard: React.FC<DashboardProps> = ({ data, lang, setView, onSelectSale
         </div>
       </div>
 
-      {/* RECENT TRANSACTIONS TABLE */}
-      <div className="bg-zinc-900/30 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-[48px] overflow-hidden backdrop-blur-sm shadow-2xl">
-          <div className="p-10 border-b border-zinc-800 light:border-zinc-200 flex justify-between items-center bg-black/20 light:bg-zinc-50">
-            <h3 className="text-xs font-black uppercase tracking-[0.3em] flex items-center gap-3 text-zinc-100 light:text-zinc-900">
-              <Clock size={20} className="text-red-500" />
-              {t.recent_transactions}
-            </h3>
-            <button onClick={() => setView('reports')} className="text-[10px] font-black uppercase text-red-500 hover:underline">{lang === 'ar' ? 'مشاهدة الكل' : 'View Full Ledger'}</button>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-start">
-              <thead>
-                <tr className="text-[10px] uppercase text-zinc-500 border-b border-zinc-800/50 light:border-zinc-200 font-black tracking-[0.2em] bg-black/10 light:bg-zinc-50/50">
-                  <th className="px-10 py-6 text-start">{t.time}</th>
-                  <th className="px-10 py-6 text-start">{lang === 'ar' ? 'المحتوى' : 'Items'}</th>
-                  <th className="px-10 py-6 text-start">{t.total}</th>
-                  <th className="px-10 py-6 text-start">{lang === 'ar' ? 'الربح' : 'Profit'}</th>
-                  <th className="px-10 py-6 text-end"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {(data?.sales || []).slice(0, 6).map((sale) => (
-                  <tr key={sale.id} onClick={() => onSelectSale(sale)} className="border-b border-zinc-800/50 light:border-zinc-100 hover:bg-zinc-800/30 light:hover:bg-zinc-50 transition-colors cursor-pointer group">
-                    <td className="px-10 py-5 text-[11px] font-mono text-zinc-500 light:text-zinc-400">{new Date(sale.timestamp).toLocaleTimeString()}</td>
-                    <td className="px-10 py-5 text-sm font-bold text-zinc-300 light:text-zinc-900">{sale.items.length} {t.items}</td>
-                    <td className="px-10 py-5 text-lg font-black text-zinc-100 light:text-zinc-900">{data.currency} {sale.total.toLocaleString()}</td>
-                    <td className="px-10 py-5 text-xs font-black text-emerald-500">+{data.currency} {(sale.totalProfit || 0).toFixed(2)}</td>
-                    <td className="px-10 py-5 text-end opacity-0 group-hover:opacity-100 transition-opacity"><ArrowUpRight size={18} className="text-zinc-600 inline"/></td>
-                  </tr>
-                ))}
-                {data?.sales.length === 0 && (
-                   <tr>
-                     <td colSpan={5} className="py-20 text-center text-zinc-600 font-black uppercase text-xs tracking-widest opacity-20">
-                       <ShoppingCart size={48} className="mx-auto mb-4" />
-                       {t.no_sales_today}
-                     </td>
-                   </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-      </div>
+      {/* SHIFT MODAL */}
+      {showShiftModal && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4 animate-in fade-in duration-300">
+           <div className="bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 w-full max-w-md rounded-[48px] overflow-hidden shadow-2xl">
+              <div className="p-8 border-b border-zinc-800 light:border-zinc-200 flex justify-between items-center bg-black/20 light:bg-zinc-50">
+                <h4 className="text-2xl font-black uppercase tracking-tighter light:text-zinc-900">{showShiftModal === 'open' ? (lang === 'ar' ? 'فتح وردية جديدة' : 'Open New Shift') : (lang === 'ar' ? 'إغلاق الوردية الحالية' : 'Close Current Shift')}</h4>
+                <button onClick={() => setShowShiftModal(null)} className="p-3 text-zinc-500"><X size={24}/></button>
+              </div>
+              <div className="p-8 space-y-6">
+                 <div>
+                    <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 block mb-2">{showShiftModal === 'open' ? (lang === 'ar' ? 'رصيد البداية' : 'Starting Cash') : (lang === 'ar' ? 'رصيد النهاية (الفعلي)' : 'Closing Cash (Actual)')}</label>
+                    <input type="number" className="w-full bg-black light:bg-zinc-100 border border-zinc-800 light:border-zinc-200 rounded-2xl px-6 py-4 text-3xl font-black text-red-500" autoFocus value={shiftAmount} onChange={e => setShiftAmount(parseFloat(e.target.value) || 0)} />
+                 </div>
+                 <button onClick={handleShiftAction} className="w-full py-4 bg-red-600 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl">
+                   {lang === 'ar' ? 'تأكيد' : 'Confirm'}
+                 </button>
+              </div>
+           </div>
+        </div>
+      )}
 
-      {/* ALERTS MODAL */}
-      {detailModal === 'alerts' && (
+      {/* DRILL DOWN MODAL */}
+      {drillDown && (
          <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4 animate-in fade-in duration-300">
-            <div className="bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 w-full max-w-4xl rounded-[48px] overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+            <div className="bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 w-full max-w-5xl rounded-[48px] overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
                <div className="p-10 border-b border-zinc-800 light:border-zinc-200 flex justify-between items-center bg-black/20 light:bg-zinc-50">
-                 <h4 className="text-2xl font-black uppercase tracking-tighter light:text-zinc-900">{lang === 'ar' ? 'مركز التنبيهات الحرجة' : 'Critical Alerts Dashboard'}</h4>
-                 <button onClick={() => setDetailModal(null)} className="p-3 hover:bg-zinc-800 light:hover:bg-zinc-100 rounded-full transition-colors text-zinc-500 hover:text-white light:hover:text-zinc-900"><X size={28}/></button>
+                 <div>
+                    <h4 className="text-2xl font-black uppercase tracking-tighter light:text-zinc-900">{lang === 'ar' ? 'تفاصيل المؤشرات' : 'Metric Breakdown'}</h4>
+                    <p className="text-[10px] text-zinc-500 uppercase font-black">{drillDown.replace('_', ' ')}</p>
+                 </div>
+                 <button onClick={() => setDrillDown(null)} className="p-3 hover:bg-zinc-800 light:hover:bg-zinc-100 rounded-full transition-colors text-zinc-500 hover:text-white light:hover:text-zinc-900"><X size={28}/></button>
                </div>
                
-               <div className="flex-1 overflow-y-auto p-12 grid grid-cols-1 md:grid-cols-2 gap-12 scrollbar-thin">
-                  {/* Stock Risk List */}
-                  <div className="space-y-8">
-                     <h5 className="text-[11px] font-black uppercase tracking-[0.3em] text-orange-500 flex items-center gap-3"><AlertTriangle size={18}/> {lang === 'ar' ? 'مخاطر نفاذ المخزون' : 'Stock Exhaustion Risk'}</h5>
-                     <div className="space-y-4">
-                        {stats.lowStockItems.map(p => (
-                           <div key={p.id} className="p-6 bg-black/20 light:bg-zinc-50 rounded-3xl border border-zinc-800 light:border-zinc-200 flex justify-between items-center hover:scale-[1.02] transition-transform">
-                              <div>
-                                 <p className="text-sm font-bold text-zinc-100 light:text-zinc-900 uppercase">{p.name}</p>
-                                 <p className="text-[10px] text-zinc-500 uppercase font-black">{p.category}</p>
-                              </div>
-                              <div className="text-end">
-                                 <p className="text-xs font-black text-orange-500">{p.stock} Units Left</p>
-                                 <p className="text-[9px] text-zinc-600 uppercase">Limit: {p.minStockLevel || p.minStock}</p>
-                              </div>
-                           </div>
-                        ))}
-                     </div>
-                  </div>
+               <div className="flex-1 overflow-y-auto p-12 scrollbar-thin">
+                  {drillDown === 'net_profit' && (
+                    <div className="space-y-8">
+                       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                          <div className="p-6 bg-zinc-950 light:bg-zinc-100 rounded-3xl border border-zinc-800 light:border-zinc-200">
+                             <p className="text-xs font-black text-zinc-500 uppercase mb-2">Revenue (Sales)</p>
+                             <p className="text-2xl font-black text-green-500">{data.currency} {stats.productRevenue.toLocaleString()}</p>
+                          </div>
+                          <div className="p-6 bg-zinc-950 light:bg-zinc-100 rounded-3xl border border-zinc-800 light:border-zinc-200">
+                             <p className="text-xs font-black text-zinc-500 uppercase mb-2">Cost (COGS)</p>
+                             <p className="text-2xl font-black text-red-500">-{data.currency} {stats.cogs.toLocaleString()}</p>
+                          </div>
+                          <div className="p-6 bg-zinc-950 light:bg-zinc-100 rounded-3xl border border-zinc-800 light:border-zinc-200">
+                             <p className="text-xs font-black text-zinc-500 uppercase mb-2">Expenses & Salaries</p>
+                             <p className="text-2xl font-black text-orange-500">-{data.currency} {stats.totalOperatingExpenses.toLocaleString()}</p>
+                          </div>
+                       </div>
 
-                  {/* Expiry Risk List */}
-                  <div className="space-y-8">
-                     <h5 className="text-[11px] font-black uppercase tracking-[0.3em] text-red-500 flex items-center gap-3"><Calendar size={18}/> {lang === 'ar' ? 'انتهاء الصلاحية الوشيك' : 'Imminent Expiry Warning'}</h5>
-                     <div className="space-y-4">
-                        {stats.expiringSoon.map(p => (
-                           <div key={p.id} className="p-6 bg-black/20 light:bg-zinc-50 rounded-3xl border border-zinc-800 light:border-zinc-200 flex justify-between items-center hover:scale-[1.02] transition-transform">
-                              <div>
-                                 <p className="text-sm font-bold text-zinc-100 light:text-zinc-900 uppercase">{p.name}</p>
-                                 <p className="text-[10px] text-zinc-500 uppercase font-black">{p.brand || 'No Brand'}</p>
-                              </div>
-                              <div className="text-end">
-                                 <p className="text-xs font-black text-red-500">{new Date(p.expiryDate!).toLocaleDateString()}</p>
-                                 <p className="text-[9px] text-zinc-600 uppercase">Aisle: {p.aisleLocation || '---'}</p>
-                              </div>
-                           </div>
-                        ))}
+                       <div>
+                          <h5 className="text-sm font-black uppercase text-zinc-400 mb-4 flex items-center gap-2"><Receipt size={16}/> Breakdown</h5>
+                          <table className="w-full text-start">
+                             <thead>
+                                <tr className="text-[10px] uppercase font-black text-zinc-600 border-b border-zinc-800/50">
+                                   <th className="pb-2 text-start">Type</th>
+                                   <th className="pb-2 text-start">Details</th>
+                                   <th className="pb-2 text-end">Amount</th>
+                                </tr>
+                             </thead>
+                             <tbody className="divide-y divide-zinc-800/30">
+                                {data.expenses.slice(0,10).map(e => (
+                                   <tr key={e.id}>
+                                      <td className="py-3 text-xs font-bold text-red-400">Expense</td>
+                                      <td className="py-3 text-xs text-zinc-400">{e.description}</td>
+                                      <td className="py-3 text-end text-xs font-black text-red-500">-{e.amount.toLocaleString()}</td>
+                                   </tr>
+                                ))}
+                                {data.salaryTransactions.slice(0,10).map(s => (
+                                   <tr key={s.id}>
+                                      <td className="py-3 text-xs font-bold text-blue-400">Salary</td>
+                                      <td className="py-3 text-xs text-zinc-400">Payroll: {data.employees.find(e => e.id === s.employeeId)?.name || 'Staff'}</td>
+                                      <td className="py-3 text-end text-xs font-black text-red-500">-{s.amount.toLocaleString()}</td>
+                                   </tr>
+                                ))}
+                             </tbody>
+                          </table>
+                       </div>
+                    </div>
+                  )}
+
+                  {drillDown === 'inventory_alerts' && (
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+                       <div className="space-y-4">
+                          <h5 className="text-[11px] font-black uppercase tracking-[0.3em] text-orange-500 flex items-center gap-3"><AlertTriangle size={18}/> Stock Risk</h5>
+                          {stats.lowStockItems.map(p => (
+                             <div key={p.id} className="p-4 bg-zinc-950 light:bg-zinc-100 rounded-2xl flex justify-between items-center">
+                                <span className="font-bold text-sm light:text-zinc-900">{p.name}</span>
+                                <span className="font-black text-xs text-orange-500">{p.stock} left</span>
+                             </div>
+                          ))}
+                       </div>
+                       <div className="space-y-4">
+                          <h5 className="text-[11px] font-black uppercase tracking-[0.3em] text-red-500 flex items-center gap-3"><Calendar size={18}/> Expiry Risk</h5>
+                          {stats.expiringSoon.map(p => (
+                             <div key={p.id} className="p-4 bg-zinc-950 light:bg-zinc-100 rounded-2xl flex justify-between items-center">
+                                <span className="font-bold text-sm light:text-zinc-900">{p.name}</span>
+                                <span className="font-black text-xs text-red-500">{new Date(p.expiryDate!).toLocaleDateString()}</span>
+                             </div>
+                          ))}
+                       </div>
                      </div>
-                  </div>
+                  )}
+                  
+                  {/* Additional views for Receivables/Payables can be added here following same pattern */}
+                  {drillDown === 'receivables' && (
+                     <div className="space-y-4">
+                        <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl text-blue-400 text-sm font-bold text-center">
+                           Total: {data.currency} {stats.receivables.toLocaleString()}
+                        </div>
+                        {data.customers.filter(c => (c.totalPurchases - (c.invoiceCount * 0 /* Need Logic for Paid vs Credit */)) > 0).length === 0 && <p className="text-center text-zinc-500 py-10">No specific credit data tracked yet per customer invoice.</p>}
+                     </div>
+                  )}
                </div>
             </div>
          </div>

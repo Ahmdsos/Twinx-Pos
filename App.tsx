@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import ReactDOM from 'react-dom/client';
 import { 
   LayoutDashboard, 
   ShoppingCart, 
@@ -18,7 +19,7 @@ import {
   Contact,
   UserCircle
 } from 'lucide-react';
-import { AppData, ViewType, DraftInvoice, LogEntry, Sale, Role } from './types';
+import { AppData, ViewType, DraftInvoice, LogEntry, Sale, Role, CartItem } from './types';
 import { storageService } from './services/storage';
 import { translations, Language } from './translations';
 import Dashboard from './components/Dashboard';
@@ -50,9 +51,9 @@ const App: React.FC = () => {
 
   // TWINX INTEGRITY: Track selected ID instead of object to ensure reactivity
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
-  
-  // Re-Order State (Navigation from Delivery to Sales)
-  const [reorderSale, setReorderSale] = useState<Sale | null>(null);
+
+  // Cart Pre-fill State (For Re-Order functionality)
+  const [itemsToLoad, setItemsToLoad] = useState<CartItem[]>([]);
   
   const [data, setData] = useState<AppData>({
     products: [],
@@ -68,9 +69,9 @@ const App: React.FC = () => {
     employees: [],
     attendance: [],
     salaryTransactions: [],
-    shifts: [],
     categories: [],
     stockLogs: [],
+    shifts: [],
     initialCash: 0,
     draftExpiryMinutes: 120,
     currency: 'EGP',
@@ -119,9 +120,9 @@ const App: React.FC = () => {
       employees: loadedData.employees || [],
       attendance: loadedData.attendance || [],
       salaryTransactions: loadedData.salaryTransactions || [],
-      shifts: loadedData.shifts || [],
       categories: loadedData.categories || [],
       stockLogs: loadedData.stockLogs || [],
+      shifts: loadedData.shifts || [],
       currency: loadedData.currency || 'EGP'
     };
 
@@ -155,34 +156,45 @@ const App: React.FC = () => {
     });
   }, []);
 
-  // Net Cash Logic (Financial Truth Implementation)
-  const totalRetailSales = data.sales.reduce((acc, sale) => acc + (sale.paidAmount || 0), 0);
-  const totalExpenses = data.expenses.reduce((acc, exp) => acc + exp.amount, 0);
-  const totalRefunds = data.returns?.reduce((acc, ret) => acc + ret.totalRefund, 0) || 0;
-  const totalWholesaleReceived = (data.wholesaleTransactions || [])
-    .filter(t => t.type === 'sale')
-    .reduce((acc, t) => acc + t.paidAmount, 0);
-  const totalWholesalePaidOut = (data.wholesaleTransactions || [])
-    .filter(t => t.type === 'purchase')
-    .reduce((acc, t) => acc + t.paidAmount, 0);
+  // Handle Re-Order from Delivery Screen
+  const handleLoadCart = (items: CartItem[]) => {
+    setItemsToLoad(items);
+    setView('sales');
+  };
 
-  const cashBalance = data.initialCash + totalRetailSales + totalWholesaleReceived - totalExpenses - totalRefunds - totalWholesalePaidOut;
+  // --- FINANCIAL TRUTH ---
+  // Calculates 'Cash in Drawer' by excluding pending/cancelled deliveries and unpaid wholesale
+  const cashBalance = useMemo(() => {
+    // 1. Retail Sales: Only 'completed' or 'delivered' count. 'pending' is money with driver.
+    const realizedRetailSales = data.sales.reduce((acc, sale) => {
+      if (sale.status === 'completed' || sale.status === 'delivered') {
+        return acc + (sale.paidAmount || 0);
+      }
+      return acc;
+    }, 0);
+
+    const totalExpenses = data.expenses.reduce((acc, exp) => acc + exp.amount, 0);
+    const totalRefunds = data.returns?.reduce((acc, ret) => acc + ret.totalRefund, 0) || 0;
+    
+    // 2. Wholesale: Cash received (Sales) or Paid out (Purchases)
+    const totalWholesaleReceived = (data.wholesaleTransactions || [])
+      .filter(t => t.type === 'sale')
+      .reduce((acc, t) => acc + t.paidAmount, 0);
+    const totalWholesalePaidOut = (data.wholesaleTransactions || [])
+      .filter(t => t.type === 'purchase')
+      .reduce((acc, t) => acc + t.paidAmount, 0);
+
+    return data.initialCash + realizedRetailSales + totalWholesaleReceived - totalExpenses - totalRefunds - totalWholesalePaidOut;
+  }, [data]);
 
   const renderView = () => {
     const setSaleId = (sale: Sale) => setSelectedSaleId(sale.id);
 
     switch (view) {
       case 'dashboard':
-        return <Dashboard data={data} lang={lang} setView={setView} onSelectSale={setSaleId} cashBalance={cashBalance} />;
+        return <Dashboard data={data} updateData={updateData} lang={lang} setView={setView} onSelectSale={setSaleId} cashBalance={cashBalance} />;
       case 'sales':
-        return <SalesScreen 
-          data={data} 
-          updateData={updateData} 
-          addLog={addLog} 
-          lang={lang} 
-          reorderSale={reorderSale}
-          onClearReorder={() => setReorderSale(null)}
-        />;
+        return <SalesScreen data={data} updateData={updateData} addLog={addLog} lang={lang} initialCart={itemsToLoad} clearInitialCart={() => setItemsToLoad([])} />;
       case 'inventory':
         return <InventoryScreen data={data} updateData={updateData} addLog={addLog} lang={lang} />;
       case 'expenses':
@@ -198,14 +210,7 @@ const App: React.FC = () => {
       case 'wholesale':
         return <WholesaleScreen data={data} updateData={updateData} addLog={addLog} lang={lang} />;
       case 'delivery':
-        return <DeliveryScreen 
-          data={data} 
-          updateData={updateData} 
-          addLog={addLog} 
-          lang={lang} 
-          onSelectSale={setSaleId} 
-          onReorder={(sale) => { setReorderSale(sale); setView('sales'); }}
-        />;
+        return <DeliveryScreen data={data} updateData={updateData} addLog={addLog} lang={lang} onSelectSale={setSaleId} onReorder={handleLoadCart} />;
       case 'customers':
         return <CustomersScreen data={data} updateData={updateData} addLog={addLog} lang={lang} onSelectSale={setSaleId} />;
       case 'hr':
@@ -213,7 +218,7 @@ const App: React.FC = () => {
       case 'settings':
         return <SettingsScreen data={data} updateData={updateData} setData={setData} addLog={addLog} lang={lang} />;
       default:
-        return <Dashboard data={data} lang={lang} setView={setView} onSelectSale={setSaleId} cashBalance={cashBalance} />;
+        return <Dashboard data={data} updateData={updateData} lang={lang} setView={setView} onSelectSale={setSaleId} cashBalance={cashBalance} />;
     }
   };
 
@@ -225,18 +230,18 @@ const App: React.FC = () => {
       roles: Role[];
     }
     const items: NavItem[] = [
-      { id: 'dashboard', label: t.dashboard, icon: <LayoutDashboard size={20} />, roles: ['admin', 'cashier', 'delivery'] },
-      { id: 'sales', label: t.sales, icon: <ShoppingCart size={20} />, roles: ['admin', 'cashier'] },
-      { id: 'wholesale', label: t.wholesale, icon: <Users size={20} />, roles: ['admin'] },
-      { id: 'customers', label: t.customers, icon: <Contact size={20} />, roles: ['admin', 'cashier'] },
-      { id: 'hr', label: t.hr, icon: <UserCircle size={20} />, roles: ['admin'] },
-      { id: 'delivery', label: t.delivery, icon: <Truck size={20} />, roles: ['admin', 'cashier', 'delivery'] },
-      { id: 'inventory', label: t.inventory, icon: <Package size={20} />, roles: ['admin', 'cashier'] },
-      { id: 'reports', label: t.reports, icon: <BarChart3 size={20} />, roles: ['admin'] },
-      { id: 'returns', label: t.returns, icon: <RotateCcw size={20} />, roles: ['admin', 'cashier'] },
-      { id: 'expenses', label: t.expenses, icon: <Receipt size={20} />, roles: ['admin'] },
-      { id: 'intelligence', label: t.intelligence, icon: <Zap size={20} />, roles: ['admin'] },
-      { id: 'logs', label: t.logs, icon: <ShieldCheck size={20} />, roles: ['admin'] },
+      { id: 'dashboard', label: t.dashboard, icon: <LayoutDashboard size={20} />, roles: ['admin', 'cashier', 'delivery', 'manager'] },
+      { id: 'sales', label: t.sales, icon: <ShoppingCart size={20} />, roles: ['admin', 'cashier', 'manager'] },
+      { id: 'wholesale', label: t.wholesale, icon: <Users size={20} />, roles: ['admin', 'manager'] },
+      { id: 'customers', label: t.customers, icon: <Contact size={20} />, roles: ['admin', 'cashier', 'manager'] },
+      { id: 'hr', label: t.hr, icon: <UserCircle size={20} />, roles: ['admin', 'manager'] },
+      { id: 'delivery', label: t.delivery, icon: <Truck size={20} />, roles: ['admin', 'cashier', 'delivery', 'manager'] },
+      { id: 'inventory', label: t.inventory, icon: <Package size={20} />, roles: ['admin', 'cashier', 'manager'] },
+      { id: 'reports', label: t.reports, icon: <BarChart3 size={20} />, roles: ['admin', 'manager'] },
+      { id: 'returns', label: t.returns, icon: <RotateCcw size={20} />, roles: ['admin', 'cashier', 'manager'] },
+      { id: 'expenses', label: t.expenses, icon: <Receipt size={20} />, roles: ['admin', 'manager'] },
+      { id: 'intelligence', label: t.intelligence, icon: <Zap size={20} />, roles: ['admin', 'manager'] },
+      { id: 'logs', label: t.logs, icon: <ShieldCheck size={20} />, roles: ['admin', 'manager'] },
       { id: 'settings', label: t.settings, icon: <SettingsIcon size={20} />, roles: ['admin'] },
     ];
 

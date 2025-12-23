@@ -1,3 +1,4 @@
+
 import React, { useMemo, useState } from 'react';
 import { AppData, Sale, Product, Employee, SalaryTransaction } from '../types';
 import { 
@@ -59,16 +60,23 @@ const ReportsScreen: React.FC<ReportsScreenProps> = ({ data, lang, onSelectSale 
     const salaries = data.salaryTransactions || [];
     const returns = data.returns || [];
 
-    const revenue = sales.reduce((acc, s) => acc + s.total, 0);
-    const cost = sales.reduce((acc, s) => acc + (s.totalCost || 0), 0);
-    const deliveryIncome = sales.reduce((acc, s) => acc + (s.deliveryFee || 0), 0);
-    const totalDiscounts = sales.reduce((acc, s) => acc + s.totalDiscount, 0);
+    // Revenue only counts non-cancelled
+    const validSales = sales.filter(s => s.status !== 'cancelled');
+
+    const revenue = validSales.reduce((acc, s) => acc + s.total, 0);
+    const cost = validSales.reduce((acc, s) => acc + (s.totalCost || 0), 0);
+    const deliveryIncome = validSales.reduce((acc, s) => acc + (s.deliveryFee || 0), 0);
+    const totalDiscounts = validSales.reduce((acc, s) => acc + s.totalDiscount, 0);
     
     // Operating Expenses
     const opsExpenses = expenses.reduce((acc, e) => acc + e.amount, 0);
     const salaryCosts = salaries.reduce((acc, s) => acc + s.amount, 0);
     const refundOutflow = returns.reduce((acc, r) => acc + r.totalRefund, 0);
 
+    // FIXED LOGIC: Revenue (already includes delivery fee in 'total' usually, but depending on calculation above)
+    // In operations.ts: total = productRevenue + deliveryIncome. So 'revenue' variable here includes delivery.
+    // Net Profit = Revenue - COGS - Expenses - Salaries - Refunds
+    
     const netProfit = (revenue - cost) - opsExpenses - salaryCosts - refundOutflow;
 
     // Daily trend (Profit)
@@ -83,7 +91,7 @@ const ReportsScreen: React.FC<ReportsScreenProps> = ({ data, lang, onSelectSale 
       const daySales = data.sales.filter(s => {
         const sDate = new Date(s.timestamp);
         sDate.setHours(0,0,0,0);
-        return sDate.getTime() === day.getTime();
+        return sDate.getTime() === day.getTime() && s.status !== 'cancelled';
       });
       const dayRev = daySales.reduce((acc, s) => acc + s.total, 0);
       const dayCost = daySales.reduce((acc, s) => acc + (s.totalCost || 0), 0);
@@ -100,7 +108,7 @@ const ReportsScreen: React.FC<ReportsScreenProps> = ({ data, lang, onSelectSale 
   const productPerformance = useMemo(() => {
     const perf: Record<string, { name: string; category: string; qty: number; cost: number; revenue: number; profit: number }> = {};
     
-    filteredSales.forEach(s => {
+    filteredSales.filter(s => s.status !== 'cancelled').forEach(s => {
       s.items.forEach(item => {
         if (!perf[item.id]) {
           perf[item.id] = { name: item.name, category: item.category, qty: 0, cost: 0, revenue: 0, profit: 0 };
@@ -121,8 +129,10 @@ const ReportsScreen: React.FC<ReportsScreenProps> = ({ data, lang, onSelectSale 
   const employeeAudit = useMemo(() => {
     const audit: Record<string, { name: string; role: string; salesCount: number; revenue: number; discounts: number }> = {};
     
-    filteredSales.forEach(s => {
-      const staffId = s.driverId || 'Store-Direct';
+    filteredSales.filter(s => s.status !== 'cancelled').forEach(s => {
+      const staffId = s.driverId || 'Store-Direct'; // Basic attribution to driver or store
+      // Note: A real POS would have a separate 'soldBy' field. Currently using driverId or defaulting.
+      
       if (!audit[staffId]) {
         const staff = data.employees.find(e => e.id === staffId);
         audit[staffId] = { 

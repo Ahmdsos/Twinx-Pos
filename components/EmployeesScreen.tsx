@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { AppData, Employee, SalaryTransaction, LogEntry } from '../types';
+import { AppData, Employee, Attendance, SalaryTransaction, LogEntry, Sale } from '../types';
 import { translations, Language } from '../translations';
 import { 
   Users, 
@@ -10,16 +10,20 @@ import {
   Phone, 
   DollarSign, 
   Calendar, 
+  Clock, 
   CheckCircle2, 
   UserPlus,
+  ArrowUpRight,
+  ShieldCheck,
   Coffee,
   LogOut,
+  ChevronRight,
   TrendingUp,
   History,
   Info,
   MapPin,
   CreditCard,
-  Briefcase
+  Lock
 } from 'lucide-react';
 import { TwinXOps } from '../services/operations';
 
@@ -38,11 +42,10 @@ const EmployeesScreen: React.FC<EmployeesScreenProps> = ({ data, updateData, add
   const [selectedStaff, setSelectedStaff] = useState<Employee | null>(null);
   const [showPayrollModal, setShowPayrollModal] = useState(false);
   
-  // Filters for History Modal
+  // Filters for Modal
   const [historyMonth, setHistoryMonth] = useState(new Date().getMonth());
   const [historyYear, setHistoryYear] = useState(new Date().getFullYear());
 
-  // Enhanced Form State
   const [employeeForm, setEmployeeForm] = useState<Omit<Employee, 'id' | 'joinDate' | 'isActive'>>({
     name: '',
     phone: '',
@@ -50,8 +53,14 @@ const EmployeesScreen: React.FC<EmployeesScreenProps> = ({ data, updateData, add
     baseSalary: 0,
     nationalId: '',
     address: '',
-    vehicleId: '',
-    permissions: []
+    emergencyContact: '',
+    permissions: {
+      canDeleteInvoice: false,
+      canApplyDiscount: false,
+      canViewReports: false,
+      canManageStaff: false,
+      canEditInventory: false
+    }
   });
 
   const [payrollForm, setPayrollForm] = useState<Omit<SalaryTransaction, 'id' | 'timestamp'>>({
@@ -66,8 +75,7 @@ const EmployeesScreen: React.FC<EmployeesScreenProps> = ({ data, updateData, add
   const filteredEmployees = useMemo(() => {
     return (data.employees || []).filter(e => 
       e.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-      e.phone.includes(searchTerm) ||
-      (e.nationalId && e.nationalId.includes(searchTerm))
+      e.phone.includes(searchTerm)
     );
   }, [data.employees, searchTerm]);
 
@@ -86,34 +94,24 @@ const EmployeesScreen: React.FC<EmployeesScreenProps> = ({ data, updateData, add
     return { count: sales.length, total };
   };
 
-  const resetForm = () => {
-    setEmployeeForm({
-      name: '',
-      phone: '',
-      role: 'cashier',
-      baseSalary: 0,
-      nationalId: '',
-      address: '',
-      vehicleId: '',
-      permissions: []
+  const selectEmployeeForPayroll = (empId: string) => {
+    const emp = data.employees.find(e => e.id === empId);
+    setPayrollForm({
+      employeeId: empId,
+      amount: emp ? emp.baseSalary : 0, // DEFAULT TO BASE SALARY
+      type: 'salary',
+      notes: ''
     });
   };
 
-  const saveEmployee = () => {
-    if (!employeeForm.name || !employeeForm.phone) return;
-    
-    // Check if adding or updating (simplified: we delete old and add new for update in this context, or standard add)
-    // For a real app, we'd want proper edit ID tracking. Assuming Add New for now based on UI flow.
-    const newEmp: Employee = { 
-      ...employeeForm, 
-      id: crypto.randomUUID(), 
-      joinDate: new Date().toISOString(), 
-      isActive: true 
-    };
-    
-    updateData(TwinXOps.addEmployee(data, newEmp));
-    setShowAddModal(false);
-    resetForm();
+  const togglePermission = (key: keyof Employee['permissions']) => {
+    setEmployeeForm(prev => ({
+      ...prev,
+      permissions: {
+        ...prev.permissions,
+        [key]: !prev.permissions[key]
+      }
+    }));
   };
 
   return (
@@ -147,7 +145,7 @@ const EmployeesScreen: React.FC<EmployeesScreenProps> = ({ data, updateData, add
             <button onClick={() => setActiveTab('payroll')} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'payroll' ? 'bg-red-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-300'}`}>{t.payroll}</button>
           </div>
 
-          <button onClick={() => { resetForm(); setShowAddModal(true); }} className="bg-zinc-100 light:bg-zinc-900 text-black light:text-white px-5 py-2.5 rounded-xl flex items-center gap-2 font-black transition-all shadow-xl text-sm uppercase">
+          <button onClick={() => setShowAddModal(true)} className="bg-zinc-100 light:bg-zinc-900 text-black light:text-white px-5 py-2.5 rounded-xl flex items-center gap-2 font-black transition-all shadow-xl text-sm uppercase">
             <UserPlus size={20} /> {t.add_employee}
           </button>
         </div>
@@ -163,7 +161,6 @@ const EmployeesScreen: React.FC<EmployeesScreenProps> = ({ data, updateData, add
                   <th className="px-8 py-5 text-start">{t.employee_name}</th>
                   <th className="px-8 py-5 text-start">{t.role}</th>
                   <th className="px-8 py-5 text-start">{t.phone_number}</th>
-                  <th className="px-8 py-5 text-start">{lang === 'ar' ? 'الرقم القومي' : 'National ID'}</th>
                   <th className="px-8 py-5 text-start">{t.base_salary}</th>
                   <th className="px-8 py-5 text-end">{t.actions}</th>
                 </tr>
@@ -174,20 +171,14 @@ const EmployeesScreen: React.FC<EmployeesScreenProps> = ({ data, updateData, add
                     <td className="px-8 py-4">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-2xl bg-zinc-800 light:bg-zinc-100 flex items-center justify-center font-black text-xs text-zinc-400">{emp.name.charAt(0)}</div>
-                        <div>
-                          <p className="font-bold text-zinc-100 light:text-zinc-900 leading-tight">{emp.name}</p>
-                          <p className="text-[9px] text-zinc-500">{emp.address || 'No Address'}</p>
-                        </div>
+                        <span className="font-bold text-zinc-100 light:text-zinc-900">{emp.name}</span>
                       </div>
                     </td>
                     <td className="px-8 py-4">
-                       <span className={`px-2 py-1 rounded border text-[10px] font-black uppercase ${emp.role === 'admin' ? 'bg-red-600/10 text-red-500 border-red-500/20' : emp.role === 'delivery' ? 'bg-orange-600/10 text-orange-500 border-orange-500/20' : 'bg-blue-600/10 text-blue-500 border-blue-500/20'}`}>
-                         {emp.role}
-                       </span>
+                       <span className="bg-zinc-950 light:bg-zinc-100 px-2 py-1 rounded border border-zinc-800 light:border-zinc-200 text-[10px] font-black uppercase text-zinc-500">{emp.role}</span>
                     </td>
                     <td className="px-8 py-4 text-xs text-zinc-500 font-mono">{emp.phone}</td>
-                    <td className="px-8 py-4 text-xs text-zinc-500 font-mono">{emp.nationalId || '---'}</td>
-                    <td className="px-8 py-4 font-black text-emerald-500">{data.currency} {emp.baseSalary.toLocaleString()}</td>
+                    <td className="px-8 py-4 font-black text-red-500">{data.currency} {emp.baseSalary.toLocaleString()}</td>
                     <td className="px-8 py-4 text-end">
                       <button onClick={(e) => { e.stopPropagation(); updateData({ employees: data.employees.filter(ex => ex.id !== emp.id) }); }} className="p-2 text-zinc-700 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"><Trash2 size={16}/></button>
                     </td>
@@ -221,7 +212,7 @@ const EmployeesScreen: React.FC<EmployeesScreenProps> = ({ data, updateData, add
                      <div className="flex flex-col gap-2">
                         <div className="flex justify-between text-[9px] font-black uppercase text-zinc-500 px-1">
                            <span>{lang === 'ar' ? 'بدأ العمل' : 'Start'}</span>
-                           <span className="text-zinc-100 light:text-zinc-900 font-mono">{new Date(session.checkIn || Date.now()).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                           <span className="text-zinc-100 light:text-zinc-900 font-mono">{new Date(session.checkIn).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
                         </div>
                         {session.status === 'present' && (
                           <div className="flex gap-2">
@@ -301,24 +292,6 @@ const EmployeesScreen: React.FC<EmployeesScreenProps> = ({ data, updateData, add
 
               <div className="p-8 grid grid-cols-1 lg:grid-cols-3 gap-8 overflow-hidden">
                  <div className="lg:col-span-1 space-y-6">
-                    <div className="p-6 bg-zinc-950 light:bg-zinc-50 rounded-3xl border border-zinc-800 light:border-zinc-200 space-y-4">
-                       <div className="flex items-center gap-3 text-zinc-100 light:text-zinc-900 font-black uppercase text-[10px] tracking-widest"><Info size={16}/> {lang === 'ar' ? 'البيانات الشخصية' : 'Personal Details'}</div>
-                       <div className="space-y-2">
-                          <div>
-                             <p className="text-[9px] text-zinc-500 uppercase font-black">National ID</p>
-                             <p className="text-sm font-mono text-zinc-300 light:text-zinc-600">{selectedStaff.nationalId || '---'}</p>
-                          </div>
-                          <div>
-                             <p className="text-[9px] text-zinc-500 uppercase font-black">{lang === 'ar' ? 'العنوان' : 'Address'}</p>
-                             <p className="text-sm text-zinc-300 light:text-zinc-600">{selectedStaff.address || '---'}</p>
-                          </div>
-                          <div>
-                             <p className="text-[9px] text-zinc-500 uppercase font-black">{lang === 'ar' ? 'الراتب الأساسي' : 'Base Salary'}</p>
-                             <p className="text-sm text-emerald-500 font-black">{data.currency} {selectedStaff.baseSalary.toLocaleString()}</p>
-                          </div>
-                       </div>
-                    </div>
-
                     <div className="p-6 bg-zinc-950 light:bg-zinc-50 rounded-3xl border border-zinc-800 light:border-zinc-200 space-y-6">
                        <div className="flex items-center gap-3 text-red-500 font-black uppercase text-[10px] tracking-widest"><TrendingUp size={16}/> {lang === 'ar' ? 'الأداء العام' : 'Performance'}</div>
                        <div className="grid grid-cols-2 gap-4">
@@ -332,13 +305,22 @@ const EmployeesScreen: React.FC<EmployeesScreenProps> = ({ data, updateData, add
                           </div>
                        </div>
                     </div>
+                    
+                    <div className="p-6 bg-zinc-950 light:bg-zinc-50 rounded-3xl border border-zinc-800 light:border-zinc-200 space-y-4 text-start">
+                        <div className="flex items-center gap-3 text-blue-500 font-black uppercase text-[10px] tracking-widest"><Info size={16}/> Info</div>
+                        <div className="space-y-2">
+                          <p className="text-xs text-zinc-500"><span className="font-bold text-zinc-400">National ID:</span> {selectedStaff.nationalId || '---'}</p>
+                          <p className="text-xs text-zinc-500"><span className="font-bold text-zinc-400">Address:</span> {selectedStaff.address || '---'}</p>
+                          <p className="text-xs text-zinc-500"><span className="font-bold text-zinc-400">Emerg. Contact:</span> {selectedStaff.emergencyContact || '---'}</p>
+                        </div>
+                    </div>
                  </div>
 
                  <div className="lg:col-span-2 bg-zinc-950 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-[32px] overflow-hidden flex flex-col">
                     <div className="p-4 bg-black/40 light:bg-zinc-50 border-b border-zinc-800 light:border-zinc-200 text-[10px] uppercase font-black tracking-widest text-zinc-500 flex items-center gap-2"><History size={14}/> {lang === 'ar' ? 'سجل الحضور' : 'Log History'}</div>
                     <div className="flex-1 overflow-y-auto scrollbar-thin divide-y divide-zinc-800/50 light:divide-zinc-100">
                        {data.attendance
-                         .filter(a => a.employeeId === selectedStaff.id)
+                         .filter(a => a.employeeId === selectedStaff.id && new Date(a.date).getMonth() === historyMonth && new Date(a.date).getFullYear() === historyYear)
                          .sort((a,b) => b.checkIn - a.checkIn)
                          .map(log => (
                            <div key={log.id} className="p-6 flex items-center justify-between hover:bg-zinc-900 transition-colors">
@@ -366,80 +348,70 @@ const EmployeesScreen: React.FC<EmployeesScreenProps> = ({ data, updateData, add
         </div>
       )}
 
-      {/* MODAL: ADD/EDIT EMPLOYEE */}
+      {/* MODAL: ADD EMPLOYEE */}
       {showAddModal && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/90 p-4 animate-in fade-in">
-           <div className="bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 w-full max-w-2xl rounded-[40px] overflow-hidden shadow-2xl animate-in zoom-in-95 flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/90 p-4 animate-in fade-in overflow-y-auto">
+           <div className="bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 w-full max-w-2xl rounded-[40px] overflow-hidden shadow-2xl animate-in zoom-in-95 my-10">
               <div className="p-8 border-b border-zinc-800 light:border-zinc-200 flex justify-between items-center bg-black/20">
                 <h4 className="text-2xl font-black uppercase tracking-tighter light:text-zinc-900">{t.add_employee}</h4>
                 <button onClick={() => setShowAddModal(false)} className="p-3 text-zinc-500"><X size={24}/></button>
               </div>
-              
-              <div className="flex-1 overflow-y-auto p-10 space-y-6">
-                {/* Row 1: Name & Role */}
+              <div className="p-10 space-y-6 overflow-y-auto max-h-[60vh]">
                 <div className="grid grid-cols-2 gap-6">
-                  <div>
-                    <label className="text-[10px] font-black uppercase text-zinc-500 block mb-2">{t.employee_name}</label>
-                    <input type="text" className="w-full bg-black light:bg-zinc-100 border border-zinc-800 light:border-zinc-200 rounded-2xl px-6 py-4 focus:border-red-500 text-zinc-100 light:text-zinc-900 font-bold" value={employeeForm.name} onChange={e => setEmployeeForm({...employeeForm, name: e.target.value})} />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-black uppercase text-zinc-500 block mb-2">{t.role}</label>
-                    <div className="flex bg-black light:bg-zinc-100 border border-zinc-800 light:border-zinc-200 rounded-2xl p-1">
-                       {['admin', 'cashier', 'delivery'].map(role => (
-                         <button 
-                           key={role} 
-                           onClick={() => setEmployeeForm({...employeeForm, role: role as any})}
-                           className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${employeeForm.role === role ? 'bg-red-600 text-white shadow-lg' : 'text-zinc-500'}`}
-                         >
-                           {role}
-                         </button>
-                       ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Row 2: Phone & National ID */}
-                <div className="grid grid-cols-2 gap-6">
-                  <div>
-                    <label className="text-[10px] font-black uppercase text-zinc-500 block mb-2">{t.phone_number}</label>
-                    <input type="text" className="w-full bg-black light:bg-zinc-100 border border-zinc-800 light:border-zinc-200 rounded-2xl px-6 py-4 focus:border-red-500 text-zinc-100 light:text-zinc-900 font-mono" value={employeeForm.phone} onChange={e => setEmployeeForm({...employeeForm, phone: e.target.value})} />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-black uppercase text-zinc-500 block mb-2">{lang === 'ar' ? 'الرقم القومي' : 'National ID'}</label>
-                    <input type="text" className="w-full bg-black light:bg-zinc-100 border border-zinc-800 light:border-zinc-200 rounded-2xl px-6 py-4 focus:border-red-500 text-zinc-100 light:text-zinc-900 font-mono" value={employeeForm.nationalId} onChange={e => setEmployeeForm({...employeeForm, nationalId: e.target.value})} />
-                  </div>
-                </div>
-
-                {/* Row 3: Salary & Vehicle (Conditional) */}
-                <div className="grid grid-cols-2 gap-6">
-                  <div>
-                    <label className="text-[10px] font-black uppercase text-zinc-500 block mb-2">{t.base_salary}</label>
-                    <div className="relative">
-                       <DollarSign size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600"/>
-                       <input type="number" className="w-full bg-black light:bg-zinc-100 border border-zinc-800 light:border-zinc-200 rounded-2xl px-10 py-4 text-emerald-500 font-black text-lg" value={employeeForm.baseSalary} onChange={e => setEmployeeForm({...employeeForm, baseSalary: parseFloat(e.target.value) || 0})} />
-                    </div>
-                  </div>
-                  {employeeForm.role === 'delivery' && (
-                    <div className="animate-in fade-in">
-                      <label className="text-[10px] font-black uppercase text-zinc-500 block mb-2">{t.vehicle_info}</label>
-                      <input type="text" className="w-full bg-black light:bg-zinc-100 border border-zinc-800 light:border-zinc-200 rounded-2xl px-6 py-4 text-zinc-100 light:text-zinc-900 font-bold" placeholder="Plate No. / Model" value={employeeForm.vehicleId} onChange={e => setEmployeeForm({...employeeForm, vehicleId: e.target.value})} />
-                    </div>
-                  )}
-                </div>
-
-                {/* Row 4: Address */}
-                <div>
-                   <label className="text-[10px] font-black uppercase text-zinc-500 block mb-2">{lang === 'ar' ? 'العنوان السكني' : 'Residential Address'}</label>
-                   <div className="relative">
-                      <MapPin size={14} className="absolute left-4 top-4 text-zinc-600"/>
-                      <textarea className="w-full bg-black light:bg-zinc-100 border border-zinc-800 light:border-zinc-200 rounded-2xl px-10 py-4 text-zinc-100 light:text-zinc-900 font-bold resize-none" rows={3} value={employeeForm.address} onChange={e => setEmployeeForm({...employeeForm, address: e.target.value})} />
+                   <div>
+                     <label className="text-[10px] font-black uppercase text-zinc-500 block mb-2">{t.employee_name}</label>
+                     <input type="text" className="w-full bg-black light:bg-zinc-100 border border-zinc-800 light:border-zinc-200 rounded-2xl px-6 py-4 focus:border-red-500 text-zinc-100 light:text-zinc-900 font-bold" value={employeeForm.name} onChange={e => setEmployeeForm({...employeeForm, name: e.target.value})} />
+                   </div>
+                   <div>
+                     <label className="text-[10px] font-black uppercase text-zinc-500 block mb-2">{t.phone_number}</label>
+                     <input type="text" className="w-full bg-black light:bg-zinc-100 border border-zinc-800 light:border-zinc-200 rounded-2xl px-6 py-4 focus:border-red-500 text-zinc-100 light:text-zinc-900 font-mono" value={employeeForm.phone} onChange={e => setEmployeeForm({...employeeForm, phone: e.target.value})} />
                    </div>
                 </div>
-              </div>
 
-              <div className="p-8 bg-black/40 border-t border-zinc-800 flex gap-4 shrink-0">
+                <div className="grid grid-cols-2 gap-6">
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-zinc-500 block mb-2">{t.role}</label>
+                    <select className="w-full bg-black light:bg-zinc-100 border border-zinc-800 light:border-zinc-200 rounded-2xl px-6 py-4 text-zinc-100 light:text-zinc-900 font-bold" value={employeeForm.role} onChange={e => setEmployeeForm({...employeeForm, role: e.target.value as any})}>
+                      <option value="cashier">Cashier</option>
+                      <option value="delivery">Delivery</option>
+                      <option value="admin">Admin</option>
+                      <option value="manager">Manager</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-zinc-500 block mb-2">{t.base_salary}</label>
+                    <input type="number" className="w-full bg-black light:bg-zinc-100 border border-zinc-800 light:border-zinc-200 rounded-2xl px-6 py-4 text-red-500 font-black" value={employeeForm.baseSalary} onChange={e => setEmployeeForm({...employeeForm, baseSalary: parseFloat(e.target.value) || 0})} />
+                  </div>
+                </div>
+
+                <div className="space-y-4 pt-4 border-t border-zinc-800/50">
+                    <h5 className="text-[10px] font-black uppercase tracking-widest text-blue-500 flex items-center gap-2"><ShieldCheck size={12}/> Security & Details</h5>
+                    <div className="grid grid-cols-2 gap-6">
+                       <input type="text" placeholder="National ID" className="bg-black border border-zinc-800 rounded-xl px-4 py-3 text-xs" value={employeeForm.nationalId} onChange={e => setEmployeeForm({...employeeForm, nationalId: e.target.value})} />
+                       <input type="text" placeholder="Address" className="bg-black border border-zinc-800 rounded-xl px-4 py-3 text-xs" value={employeeForm.address} onChange={e => setEmployeeForm({...employeeForm, address: e.target.value})} />
+                    </div>
+                    
+                    <div className="bg-black/20 p-4 rounded-xl border border-zinc-800/50">
+                       <p className="text-[9px] font-black uppercase text-zinc-500 mb-2">Permissions</p>
+                       <div className="grid grid-cols-2 gap-2">
+                          {Object.keys(employeeForm.permissions).map(key => (
+                            <label key={key} className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer hover:text-white">
+                               <input type="checkbox" checked={employeeForm.permissions[key as keyof typeof employeeForm.permissions]} onChange={() => togglePermission(key as any)} className="accent-red-600 rounded" />
+                               {key.replace(/([A-Z])/g, ' $1').trim()}
+                            </label>
+                          ))}
+                       </div>
+                    </div>
+                </div>
+
+              </div>
+              <div className="p-8 bg-black/40 border-t border-zinc-800 flex gap-4">
                 <button onClick={() => setShowAddModal(false)} className="flex-1 py-4 bg-zinc-800 text-zinc-400 font-black uppercase text-xs rounded-2xl">{t.discard}</button>
-                <button onClick={saveEmployee} className="flex-1 py-4 bg-red-600 text-white font-black uppercase text-xs rounded-2xl shadow-xl">{t.save_ledger}</button>
+                <button onClick={() => { 
+                   const newEmp: Employee = { ...employeeForm, id: crypto.randomUUID(), joinDate: new Date().toISOString(), isActive: true };
+                   updateData(TwinXOps.addEmployee(data, newEmp));
+                   setShowAddModal(false);
+                }} className="flex-1 py-4 bg-red-600 text-white font-black uppercase text-xs rounded-2xl shadow-xl">{t.save_ledger}</button>
               </div>
            </div>
         </div>
@@ -459,17 +431,9 @@ const EmployeesScreen: React.FC<EmployeesScreenProps> = ({ data, updateData, add
                   <select 
                     className="w-full bg-black light:bg-zinc-100 border border-zinc-800 light:border-zinc-200 rounded-2xl px-6 py-4 text-zinc-100 light:text-zinc-900 font-bold" 
                     value={payrollForm.employeeId} 
-                    onChange={e => {
-                        const empId = e.target.value;
-                        setPayrollForm({...payrollForm, employeeId: empId});
-                        // Auto-fill base salary if type is 'salary'
-                        if (payrollForm.type === 'salary') {
-                            const emp = data.employees.find(x => x.id === empId);
-                            if (emp) setPayrollForm(prev => ({...prev, amount: emp.baseSalary, employeeId: empId}));
-                        }
-                    }}
+                    onChange={e => selectEmployeeForPayroll(e.target.value)}
                   >
-                    <option value="">--- Select Staff ---</option>
+                    <option value="">Select Employee...</option>
                     {data.employees.map(e => <option key={e.id} value={e.id}>{e.name} ({e.role})</option>)}
                   </select>
                 </div>
@@ -487,11 +451,18 @@ const EmployeesScreen: React.FC<EmployeesScreenProps> = ({ data, updateData, add
                     <input type="number" className="w-full bg-black light:bg-zinc-100 border border-zinc-800 light:border-zinc-200 rounded-2xl px-6 py-4 text-green-500 font-black text-xl" value={payrollForm.amount} onChange={e => setPayrollForm({...payrollForm, amount: parseFloat(e.target.value) || 0})} />
                   </div>
                 </div>
+                <input 
+                  type="text" 
+                  placeholder="Notes / Reference..." 
+                  className="w-full bg-black light:bg-zinc-100 border border-zinc-800 light:border-zinc-200 rounded-2xl px-6 py-4 text-sm"
+                  value={payrollForm.notes} 
+                  onChange={e => setPayrollForm({...payrollForm, notes: e.target.value})}
+                />
               </div>
               <div className="p-8 bg-black/40 border-t border-zinc-800 flex gap-4">
                 <button onClick={() => setShowPayrollModal(false)} className="flex-1 py-4 bg-zinc-800 text-zinc-400 font-black uppercase text-xs rounded-2xl">{t.discard}</button>
                 <button onClick={() => {
-                   if (!payrollForm.employeeId || payrollForm.amount <= 0) return;
+                   if(!payrollForm.employeeId) return alert("Select an employee");
                    const tx: SalaryTransaction = { ...payrollForm, id: crypto.randomUUID(), timestamp: Date.now() };
                    updateData(TwinXOps.processSalaryTransaction(data, tx));
                    setShowPayrollModal(false);

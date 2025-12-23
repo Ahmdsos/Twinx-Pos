@@ -9,7 +9,6 @@ export const storageService = {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Ensure all AppData fields are present after parsing including new HR modules
         return {
           products: parsed.products || [],
           sales: parsed.sales || [],
@@ -24,9 +23,9 @@ export const storageService = {
           employees: parsed.employees || [],
           attendance: parsed.attendance || [],
           salaryTransactions: parsed.salaryTransactions || [],
-          shifts: parsed.shifts || [],
           categories: parsed.categories || [],
           stockLogs: parsed.stockLogs || [],
+          shifts: parsed.shifts || [],
           initialCash: parsed.initialCash || 0,
           draftExpiryMinutes: parsed.draftExpiryMinutes || 120,
           lastBackupTimestamp: parsed.lastBackupTimestamp,
@@ -51,9 +50,9 @@ export const storageService = {
       employees: [],
       attendance: [],
       salaryTransactions: [],
-      shifts: [],
       categories: [],
       stockLogs: [],
+      shifts: [],
       initialCash: 0,
       draftExpiryMinutes: 120,
       currency: 'EGP'
@@ -99,9 +98,9 @@ export const storageService = {
             if (!data.employees) data.employees = [];
             if (!data.attendance) data.attendance = [];
             if (!data.salaryTransactions) data.salaryTransactions = [];
-            if (!data.shifts) data.shifts = [];
             if (!data.categories) data.categories = [];
             if (!data.stockLogs) data.stockLogs = [];
+            if (!data.shifts) data.shifts = [];
             resolve(data);
           } else {
             console.error("Invalid ledger format: Missing required fields.");

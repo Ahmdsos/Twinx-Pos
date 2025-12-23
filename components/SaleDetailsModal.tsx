@@ -22,6 +22,24 @@ const SaleDetailsModal: React.FC<SaleDetailsModalProps> = ({ sale, lang, currenc
 
   const linkedCustomer = customers.find(c => c.id === editedSale.customerId);
 
+  const getStatusText = (status?: string) => {
+    switch(status) {
+      case 'delivered': return lang === 'ar' ? 'تم التوصيل' : 'Delivered';
+      case 'cancelled': return lang === 'ar' ? 'ملغي' : 'Cancelled';
+      case 'pending': return lang === 'ar' ? 'قيد التوصيل' : 'Out for Delivery';
+      default: return lang === 'ar' ? 'مكتمل' : 'Completed';
+    }
+  };
+
+  const getStatusColor = (status?: string) => {
+    switch(status) {
+      case 'delivered': return 'bg-green-500/10 text-green-500';
+      case 'cancelled': return 'bg-red-500/10 text-red-500';
+      case 'pending': return 'bg-orange-500/10 text-orange-500';
+      default: return 'bg-blue-500/10 text-blue-500';
+    }
+  };
+
   const printInvoice = () => {
     const printArea = document.getElementById('print-area');
     if (!printArea) return;
@@ -138,8 +156,8 @@ const SaleDetailsModal: React.FC<SaleDetailsModalProps> = ({ sale, lang, currenc
                  </div>
                  <div className="flex items-center justify-between p-4 bg-zinc-800/30 rounded-2xl border border-zinc-800">
                    <span className="text-xs text-zinc-500">{lang === 'ar' ? 'حالة التوصيل' : 'Delivery Status'}</span>
-                   <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${editedSale.isDelivery ? 'bg-orange-500/10 text-orange-500' : 'bg-green-500/10 text-green-500'}`}>
-                     {editedSale.isDelivery ? t.delivery_scheduled : (lang === 'ar' ? 'داخل المتجر' : 'In-Store')}
+                   <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${getStatusColor(editedSale.status)}`}>
+                     {getStatusText(editedSale.status)}
                    </span>
                  </div>
               </div>

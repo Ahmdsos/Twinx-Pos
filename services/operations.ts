@@ -18,89 +18,57 @@ const createLog = (action: string, category: LogEntry['category'], details: stri
 const getTodayString = () => new Date().toISOString().split('T')[0];
 
 export const TwinXOps = {
-  /**
-   * Financial Truth Helpers
-   */
-  getTotals: (data: AppData) => {
-    const receivables = data.sales.reduce((acc, s) => acc + (s.status !== 'cancelled' ? (s.remainingAmount || 0) : 0), 0) +
-      data.wholesaleTransactions
-        .filter(t => t.type === 'sale')
-        .reduce((acc, t) => acc + (t.total - t.paidAmount), 0);
-
-    const payables = data.wholesaleTransactions
-      .filter(t => t.type === 'purchase')
-      .reduce((acc, t) => acc + (t.total - t.paidAmount), 0);
-
-    return { receivables, payables };
-  },
-
-  // ------------------------------------------------------------------
-  // SHIFT MANAGEMENT (NEW)
-  // ------------------------------------------------------------------
-
-  openShift: (currentData: AppData, cashierId: string, startCash: number): AppData => {
+  
+  // --- SHIFT MANAGEMENT ---
+  openShift: (currentData: AppData, startCash: number, openerName: string): AppData => {
     const newData: AppData = JSON.parse(JSON.stringify(currentData));
-    
-    // Safety check: Ensure no other shift is "open"
-    const existingOpen = newData.shifts.find(s => s.status === 'open');
-    if (existingOpen) {
-      throw new Error("Cannot open shift: Another shift is currently active.");
-    }
+    const activeShift = newData.shifts.find(s => s.status === 'open');
+    if (activeShift) throw new Error("A shift is already open. Please close it first.");
 
     const newShift: Shift = {
       id: crypto.randomUUID(),
-      cashierId,
+      openedBy: openerName,
       startTime: Date.now(),
       startCash,
-      endCash: startCash, // Initialize expected cash with starting amount
       status: 'open'
     };
-
-    newData.shifts = [newShift, ...newData.shifts];
-    newData.logs = [
-      createLog('SHIFT_OPEN', 'shift', `Shift opened by ${cashierId} with start cash ${startCash}`),
-      ...newData.logs
-    ].slice(0, 5000);
-
+    newData.shifts.push(newShift);
+    newData.logs = [createLog('SHIFT_OPEN', 'system', `Shift opened by ${openerName} with ${startCash}`), ...newData.logs];
     return newData;
   },
 
-  closeShift: (currentData: AppData, shiftId: string, actualEndCash: number, notes?: string): AppData => {
+  closeShift: (currentData: AppData, endCash: number, notes?: string): AppData => {
     const newData: AppData = JSON.parse(JSON.stringify(currentData));
-    const shiftIndex = newData.shifts.findIndex(s => s.id === shiftId);
-    
-    if (shiftIndex === -1) throw new Error("Shift record not found.");
-    if (newData.shifts[shiftIndex].status !== 'open') throw new Error("Shift is already closed.");
+    const shiftIndex = newData.shifts.findIndex(s => s.status === 'open');
+    if (shiftIndex === -1) throw new Error("No active shift to close.");
 
     const shift = newData.shifts[shiftIndex];
-    shift.endTime = Date.now();
-    shift.actualEndCash = actualEndCash;
-    shift.status = 'closed';
-    shift.notes = notes;
-
-    // Discrepancy logic is handled in UI display, but data is persisted here
-    const discrepancy = actualEndCash - (shift.endCash || 0);
-
-    newData.logs = [
-      createLog('SHIFT_CLOSE', 'shift', `Shift closed. Expected: ${shift.endCash}, Actual: ${actualEndCash}, Diff: ${discrepancy}`),
-      ...newData.logs
-    ].slice(0, 5000);
-
+    
+    // Calculate expected cash for this specific shift period
+    // (This is a basic estimation, a real pro system would filter sales by shiftId)
+    // For simplicity in this version, we assume linear accumulation, but storing shiftId on Sales allows precise calculation later.
+    
+    newData.shifts[shiftIndex] = {
+      ...shift,
+      endTime: Date.now(),
+      endCash,
+      status: 'closed',
+      notes
+    };
+    newData.logs = [createLog('SHIFT_CLOSE', 'system', `Shift closed. Counted: ${endCash}`), ...newData.logs];
     return newData;
   },
-
-  // ------------------------------------------------------------------
-  // RETAIL SALES (UPDATED WITH SHIFT & LOYALTY LOGIC)
-  // ------------------------------------------------------------------
 
   /**
    * Processes a retail sale atomically.
-   * PROTOCOL: Snapshot -> Mutate (Stock, Customer, Sale, Logs, Shift) -> Return New State.
-   * TWINX INTEGRITY: Loyalty points are strictly 1:1 on Product Spend.
    */
   processRetailSale: (currentData: AppData, saleData: Partial<Sale>): AppData => {
     const newData: AppData = JSON.parse(JSON.stringify(currentData));
     
+    // CRITICAL: Enforce Active Shift
+    const activeShift = newData.shifts.find(s => s.status === 'open');
+    if (!activeShift) throw new Error("SHIFT_CLOSED: You must open a shift before selling.");
+
     const items = saleData.items || [];
     const subtotal = items.reduce((acc, i) => acc + (i.price * i.quantity), 0);
     const discount = saleData.totalDiscount || 0;
@@ -113,6 +81,7 @@ export const TwinXOps = {
       if (pIndex === -1) throw new Error(`Product missing from ledger: ${item.name}`);
       const p = newData.products[pIndex];
       
+      // Stock Check (Allow over-selling if strictly needed, but here we block)
       if (p.stock < item.quantity) {
         throw new Error(`Insufficient stock for ${item.name}. Available: ${p.stock}`);
       }
@@ -121,18 +90,13 @@ export const TwinXOps = {
       newData.products[pIndex].stock -= item.quantity;
     }
 
-    // FINANCIAL PRECISION: Separate Product Revenue from Delivery Fees
     const productRevenue = subtotal - discount;
     const total = productRevenue + deliveryIncome;
     const paid = saleData.paidAmount ?? total;
     const remaining = Math.max(0, total - paid);
     const totalProfit = (productRevenue - totalCost) + deliveryIncome;
     
-    // TWINX INTEGRITY: Loyalty Points only on Product Spend (Exclude Delivery)
     const pointsEarned = Math.max(0, Math.floor(productRevenue));
-
-    // Find Active Shift
-    const activeShift = newData.shifts.find(s => s.status === 'open');
 
     const finalSale: Sale = {
       id: saleData.id || crypto.randomUUID(),
@@ -153,18 +117,10 @@ export const TwinXOps = {
       totalProfit,
       pointsEarned,
       status: saleData.status || (saleData.isDelivery ? 'pending' : 'completed'),
-      shiftId: activeShift ? activeShift.id : undefined
+      shiftId: activeShift.id
     };
 
-    // 2. Update Shift Cash (If store sale & paid)
-    if (activeShift && !finalSale.isDelivery && finalSale.status === 'completed') {
-      const shiftIndex = newData.shifts.findIndex(s => s.id === activeShift.id);
-      if (shiftIndex >= 0) {
-        newData.shifts[shiftIndex].endCash = (newData.shifts[shiftIndex].endCash || 0) + paid;
-      }
-    }
-
-    // 3. Update Customer Stats and Loyalty (Persistence check)
+    // 2. Update Customer Stats
     if (finalSale.customerId) {
       const cIndex = newData.customers.findIndex(c => c.id === finalSale.customerId);
       if (cIndex >= 0) {
@@ -180,24 +136,18 @@ export const TwinXOps = {
       }
     }
 
-    // 4. Commit Sale and Log
+    // 3. Commit
     newData.sales = [finalSale, ...newData.sales];
     newData.logs = [
-      createLog('SALE_COMPLETED', 'sale', `INV #${finalSale.id.split('-')[0]} for ${total}. Loyalty: +${pointsEarned}`),
+      createLog('SALE_COMPLETED', 'sale', `INV #${finalSale.id.split('-')[0]} for ${total}`),
       ...newData.logs
     ].slice(0, 5000);
 
     return newData;
   },
 
-  // ------------------------------------------------------------------
-  // DELIVERY OPERATIONS
-  // ------------------------------------------------------------------
-
   /**
    * Update order/delivery status with full reversal logic.
-   * ATOMIC RULE: If cancelled, RESTOCK items and DEDUCT financials from Customer.
-   * If Delivered, ADD cash to active shift.
    */
   updateDeliveryStatus: (currentData: AppData, saleId: string, status: 'delivered' | 'cancelled' | 'pending'): AppData => {
     const newData: AppData = JSON.parse(JSON.stringify(currentData));
@@ -208,32 +158,17 @@ export const TwinXOps = {
     const oldStatus = originalSale.status;
     if (oldStatus === status) return currentData;
 
-    // A) LOGIC: Transitioning TO 'delivered'
-    if (status === 'delivered' && oldStatus !== 'delivered') {
-      // 1. Settle Financials
-      newData.sales[saleIndex].paidAmount = originalSale.total;
-      newData.sales[saleIndex].remainingAmount = 0;
-
-      // 2. Add to Active Shift Cash (Driver cash drop)
-      const activeShift = newData.shifts.find(s => s.status === 'open');
-      if (activeShift) {
-        const sIdx = newData.shifts.findIndex(s => s.id === activeShift.id);
-        newData.shifts[sIdx].endCash = (newData.shifts[sIdx].endCash || 0) + originalSale.total;
-      }
-
-      // 3. Customer stats are updated during sale creation for pending orders.
-      // But if we want to ensure totalPurchases reflects only successful orders, we assume
-      // creation added it, and cancellation removes it. So delivery just confirms it.
-    }
-
-    // B) LOGIC: Transitioning TO 'cancelled'
-    else if (status === 'cancelled' && oldStatus !== 'cancelled') {
-      // 1. Restock items (respecting already returned items)
+    // REVERSAL LOGIC: Transitioning TO Cancelled
+    if (status === 'cancelled' && oldStatus !== 'cancelled') {
+      // 1. Restock items (AUTOMATIC RESTOCK)
       originalSale.items.forEach(item => {
         const pIndex = newData.products.findIndex(p => p.id === item.id);
         if (pIndex >= 0) {
-          const restockQty = item.quantity - (item.returnedQuantity || 0);
-          newData.products[pIndex].stock += restockQty;
+          // If items were previously returned via the Return module, don't double restock.
+          const quantityToRestore = item.quantity - (item.returnedQuantity || 0);
+          if (quantityToRestore > 0) {
+             newData.products[pIndex].stock += quantityToRestore;
+          }
         }
       });
 
@@ -250,9 +185,12 @@ export const TwinXOps = {
           };
         }
       }
+      
+      // 3. Mark as Cancelled (Financials in App.tsx ignore 'cancelled' status)
+      newData.sales[saleIndex].status = 'cancelled';
+      
     } 
-    
-    // C) LOGIC: Transitioning FROM 'cancelled' back to Active (Restore)
+    // RESTORATION LOGIC: Transitioning FROM Cancelled back to Active (Undo Cancel)
     else if (status !== 'cancelled' && oldStatus === 'cancelled') {
       // 1. Deduct Stock again (Validation required)
       originalSale.items.forEach(item => {
@@ -279,9 +217,12 @@ export const TwinXOps = {
           };
         }
       }
+      newData.sales[saleIndex].status = status;
+    } else {
+      // Just a normal status update (Pending -> Delivered)
+      newData.sales[saleIndex].status = status;
     }
 
-    newData.sales[saleIndex].status = status;
     newData.logs = [
       createLog('STATUS_UPDATE', 'delivery', `Order #${saleId.split('-')[0]} set to ${status.toUpperCase()}`),
       ...newData.logs
@@ -290,13 +231,9 @@ export const TwinXOps = {
     return newData;
   },
 
-  // ------------------------------------------------------------------
-  // RETURN LOGIC (ZERO-TRUST)
-  // ------------------------------------------------------------------
-
   /**
    * Processes a Return.
-   * Adjusts stock and profit based on returned items using the Golden Ratio for discounts.
+   * FIX: Added strict check to prevent infinite returns.
    */
   processReturn: (currentData: AppData, returnRecord: SaleReturn): AppData => {
     const newData: AppData = JSON.parse(JSON.stringify(currentData));
@@ -304,6 +241,8 @@ export const TwinXOps = {
     if (saleIndex === -1) throw new Error("Original sale record not found.");
     
     const originalSale = newData.sales[saleIndex];
+    if (originalSale.status === 'cancelled') throw new Error("Cannot process return for a cancelled order.");
+
     const discountRatio = originalSale.subtotal > 0 
       ? (originalSale.subtotal - originalSale.totalDiscount) / originalSale.subtotal 
       : 1;
@@ -318,9 +257,9 @@ export const TwinXOps = {
       const item = originalSale.items[itemIndex];
       const currentReturned = item.returnedQuantity || 0;
       
-      // ZERO-TRUST VALIDATION
+      // Strict Check
       if (currentReturned + returnItem.quantity > item.quantity) {
-        throw new Error(`Invalid return: Cannot return ${returnItem.quantity} of ${item.name}. Only ${item.quantity - currentReturned} remaining.`);
+        throw new Error(`Cannot return ${returnItem.quantity}. Only ${item.quantity - currentReturned} remaining for ${item.name}.`);
       }
 
       // 1. Update Sale Metadata
@@ -339,22 +278,15 @@ export const TwinXOps = {
 
     // 4. Financial Adjustments (Atomic)
     originalSale.remainingAmount = Math.max(0, originalSale.remainingAmount - totalCalculatedRefund);
-    originalSale.totalCost = Math.max(0, originalSale.totalCost - totalReturnedCost);
-    originalSale.totalProfit = Math.max(0, originalSale.totalProfit - (totalCalculatedRefund - totalReturnedCost));
+    // Note: We don't reduce totalCost/Profit on the sale record itself to preserve history, 
+    // instead the Return record acts as a contra-revenue entry in Reports.
 
-    // 5. Loyalty Reversal (Based on product refund amount)
+    // 5. Loyalty Reversal
     if (originalSale.customerId) {
       const cIndex = newData.customers.findIndex(c => c.id === originalSale.customerId);
       if (cIndex >= 0) {
         newData.customers[cIndex].totalPoints = Math.max(0, (newData.customers[cIndex].totalPoints || 0) - Math.floor(totalCalculatedRefund));
       }
-    }
-
-    // 6. Deduct from Active Shift Cash (If refund is paid out in cash)
-    const activeShift = newData.shifts.find(s => s.status === 'open');
-    if (activeShift) {
-        const sIdx = newData.shifts.findIndex(s => s.id === activeShift.id);
-        newData.shifts[sIdx].endCash = (newData.shifts[sIdx].endCash || 0) - totalCalculatedRefund;
     }
 
     newData.returns = [{ ...returnRecord, totalRefund: totalCalculatedRefund }, ...newData.returns];
@@ -364,36 +296,6 @@ export const TwinXOps = {
     ].slice(0, 5000);
 
     return newData;
-  },
-
-  // ------------------------------------------------------------------
-  // LEGACY OPERATIONS (PRESERVED)
-  // ------------------------------------------------------------------
-
-  duplicateSale: (data: AppData, originalSaleId: string): AppData => {
-    const original = data.sales.find(s => s.id === originalSaleId);
-    if (!original) throw new Error("Source invoice not found.");
-
-    const newSaleData: Partial<Sale> = {
-      id: crypto.randomUUID(),
-      timestamp: Date.now(),
-      items: original.items.map(i => ({ ...i, returnedQuantity: 0 })),
-      subtotal: original.subtotal,
-      totalDiscount: original.totalDiscount,
-      discountType: original.discountType,
-      discountValue: original.discountValue,
-      total: original.total,
-      paidAmount: 0,
-      remainingAmount: original.total,
-      saleChannel: original.saleChannel,
-      customerId: original.customerId,
-      isDelivery: original.isDelivery,
-      deliveryDetails: original.deliveryDetails,
-      deliveryFee: original.deliveryFee,
-      status: original.isDelivery ? 'pending' : 'completed'
-    };
-
-    return TwinXOps.processRetailSale(data, newSaleData);
   },
 
   processWholesaleTransaction: (currentData: AppData, transaction: WholesaleTransaction): AppData => {
@@ -418,24 +320,6 @@ export const TwinXOps = {
       ...newData.logs
     ].slice(0, 5000);
 
-    return newData;
-  },
-
-  processExpense: (currentData: AppData, expense: Expense): AppData => {
-    const newData: AppData = JSON.parse(JSON.stringify(currentData));
-    
-    // Deduct from Active Shift Cash if standard expense
-    const activeShift = newData.shifts.find(s => s.status === 'open');
-    if (activeShift) {
-        const sIdx = newData.shifts.findIndex(s => s.id === activeShift.id);
-        newData.shifts[sIdx].endCash = (newData.shifts[sIdx].endCash || 0) - expense.amount;
-    }
-
-    newData.expenses = [expense, ...newData.expenses];
-    newData.logs = [
-      createLog('EXPENSE_LOGGED', 'expense', `${expense.description}: ${expense.amount}`),
-      ...newData.logs
-    ].slice(0, 5000);
     return newData;
   },
 
@@ -490,24 +374,12 @@ export const TwinXOps = {
     const employee = newData.employees.find(e => e.id === transaction.employeeId);
     if (!employee) throw new Error("Employee not found.");
 
-    const salaryExpense: Expense = {
-      id: crypto.randomUUID(),
-      description: `Payroll: ${employee.name} (${transaction.type})`,
-      amount: transaction.amount,
-      timestamp: transaction.timestamp,
-      employeeId: employee.id
-    };
-
-    newData.salaryTransactions = [...(newData.salaryTransactions || []), transaction];
-    newData.expenses = [...(newData.expenses || []), salaryExpense];
+    // BUG FIX: Do NOT add to 'expenses' array if it is already in 'salaryTransactions'.
+    // Expenses array is for non-salary costs (Rent, etc).
+    // Reports will sum (Expenses + SalaryTransactions).
     
-    // Deduct from shift cash if paying out now
-    const activeShift = newData.shifts.find(s => s.status === 'open');
-    if (activeShift) {
-        const sIdx = newData.shifts.findIndex(s => s.id === activeShift.id);
-        newData.shifts[sIdx].endCash = (newData.shifts[sIdx].endCash || 0) - transaction.amount;
-    }
-
+    newData.salaryTransactions = [...(newData.salaryTransactions || []), transaction];
+    
     newData.logs = [
       createLog('PAYROLL', 'hr', `Paid ${transaction.type} to ${employee.name}`),
       ...newData.logs

@@ -1,7 +1,5 @@
 {
   "name": "TwinX POS",
   "description": "A high-performance, professional offline Point of Sale system for small retail businesses, featuring local data storage and product management.",
-  "requestFramePermissions": [
-    "camera"
-  ]
+  "requestFramePermissions": []
 }

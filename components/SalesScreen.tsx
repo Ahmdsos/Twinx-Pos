@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { AppData, Product, Sale, CartItem, LogEntry, Customer, SaleChannel, WholesalePartner, WholesaleTransaction } from '../types';
+import { AppData, Product, Sale, CartItem, LogEntry, Customer, SaleChannel, WholesalePartner, WholesaleTransaction, Employee } from '../types';
 import { translations, Language } from '../translations';
 import { 
   Search, 
@@ -28,8 +28,7 @@ import {
   UserCircle,
   Contact,
   Tag,
-  Percent,
-  ScanBarcode
+  Percent
 } from 'lucide-react';
 import LocalImage from './LocalImage';
 import { TwinXOps } from '../services/operations';
@@ -39,11 +38,11 @@ interface SalesScreenProps {
   updateData: (newData: Partial<AppData>) => void;
   addLog: (log: Omit<LogEntry, 'id' | 'timestamp'>) => void;
   lang: Language;
-  reorderSale: Sale | null;
-  onClearReorder: () => void;
+  initialCart?: CartItem[];
+  clearInitialCart?: () => void;
 }
 
-const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lang, reorderSale, onClearReorder }) => {
+const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lang, initialCart, clearInitialCart }) => {
   const t = translations[lang];
   const [searchTerm, setSearchTerm] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -54,10 +53,6 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
   const [selectedDriverId, setSelectedDriverId] = useState<string>('');
   const [saleChannel, setSaleChannel] = useState<SaleChannel>('store');
   
-  // Scanner Toggle State
-  const [scanMode, setScanMode] = useState(false);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-
   // POS Mode: Retail or Wholesale
   const [posMode, setPosMode] = useState<'retail' | 'wholesale'>('retail');
   
@@ -86,46 +81,15 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
   const [successSale, setSuccessSale] = useState<{id: string, type: 'retail' | 'wholesale' } | null>(null);
   const [stockError, setStockError] = useState<string | null>(null);
 
-  // Re-Order Hydration Effect
+  const activeShift = useMemo(() => data.shifts.find(s => s.status === 'open'), [data.shifts]);
+
+  // Load Initial Cart (Re-Order)
   useEffect(() => {
-    if (reorderSale) {
-      // 1. Restore Cart
-      const restoredCart = reorderSale.items.map(item => ({
-        ...item,
-        quantity: item.quantity, 
-        // Note: Prices might have changed in DB, but re-order usually respects snapshot or current price?
-        // TwinX logic: Use current DB price if available, else fallback to sale price
-        price: data.products.find(p => p.id === item.id)?.price || item.price 
-      }));
-      setCart(restoredCart);
-
-      // 2. Restore Customer Info
-      if (reorderSale.isDelivery && reorderSale.deliveryDetails) {
-        setIsDelivery(true);
-        setCustomerDetails({
-            name: reorderSale.deliveryDetails.customerName,
-            phone: reorderSale.deliveryDetails.customerPhone,
-            address: reorderSale.deliveryDetails.deliveryAddress
-        });
-        setDeliveryFee(reorderSale.deliveryFee || 0);
-        setIsCustomerLocked(true); // Lock it to prevent accidental wipe
-      } else if (reorderSale.customerId) {
-        const cust = data.customers.find(c => c.id === reorderSale.customerId);
-        if (cust) {
-            setCustomerDetails({ name: cust.name, phone: cust.phone, address: cust.address || '' });
-            setIsCustomerLocked(true);
-        }
-      }
-
-      // 3. Restore Metadata
-      setSaleChannel(reorderSale.saleChannel);
-      setDiscountType(reorderSale.discountType || 'percentage');
-      setDiscountValue(reorderSale.discountValue || 0);
-      
-      // Clear props to avoid loop
-      onClearReorder();
+    if (initialCart && initialCart.length > 0) {
+      setCart(initialCart);
+      if (clearInitialCart) clearInitialCart();
     }
-  }, [reorderSale, data.products, data.customers]);
+  }, [initialCart, clearInitialCart]);
 
   // Derived: Unified Delivery Staff from HR Module
   const deliveryStaff = useMemo(() => {
@@ -188,21 +152,6 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
       (p.barcode && p.barcode.toLowerCase().includes(term))
     );
   }, [data.products, searchTerm]);
-
-  // Handle Barcode Scan Logic (Simple exact match focus)
-  useEffect(() => {
-    if (scanMode && searchInputRef.current) {
-        searchInputRef.current.focus();
-    }
-  }, [scanMode]);
-
-  const handleProductSelect = (product: Product) => {
-      addToCart(product);
-      if (scanMode) {
-          setSearchTerm(''); // Clear search after scan-add
-          if (searchInputRef.current) searchInputRef.current.focus();
-      }
-  };
 
   const addToCart = (product: Product) => {
     setCart(prev => {
@@ -320,6 +269,12 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
   };
 
   const handleRetailCheckout = () => {
+    if (!activeShift) {
+        setStockError(lang === 'ar' ? 'يجب فتح وردية أولاً من لوحة التحكم' : 'Shift is closed. Open shift on Dashboard.');
+        setTimeout(() => setStockError(null), 3000);
+        return;
+    }
+
     if (isDelivery && !customerDetails.phone) {
       setStockError(lang === 'ar' ? 'يرجى إدخال رقم هاتف العميل' : 'Please enter customer phone');
       setTimeout(() => setStockError(null), 3000);
@@ -327,15 +282,12 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
     }
 
     try {
-      // Find or create a potential customer in the local state copy first 
-      // though TwinXOps.processRetailSale handles the customer record creation/update atomically.
       let linkedCustomerId: string | undefined = undefined;
       const existingCustomer = data.customers.find(c => c.phone === customerDetails.phone);
       
       if (existingCustomer) {
         linkedCustomerId = existingCustomer.id;
       } else if (customerDetails.phone) {
-        // Create new ID locally so we can link it
         linkedCustomerId = crypto.randomUUID();
         const newCustomer: Customer = {
           id: linkedCustomerId,
@@ -347,9 +299,7 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
           channelsUsed: [saleChannel],
           totalPoints: 0
         };
-        // We push to data temporarily so Ops can find it, or Ops handles creation. 
-        // TwinX Ops is strict, so we pre-inject if missing.
-        if (!existingCustomer) data.customers.push(newCustomer);
+        data.customers.push(newCustomer);
       }
 
       const saleData: Partial<Sale> = {
@@ -367,7 +317,7 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
           deliveryAddress: customerDetails.address
         } : undefined,
         driverId: isDelivery ? selectedDriverId : undefined,
-        paidAmount: total,
+        paidAmount: total, // Retail is usually full paid
         timestamp: Date.now()
       };
 
@@ -442,11 +392,20 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
     setSaleChannel('store');
     setDeliveryFee(0);
     clearLookup();
-    setSearchTerm('');
   };
 
   return (
-    <div className="flex h-full overflow-hidden text-start bg-zinc-950 light:bg-zinc-50">
+    <div className="flex h-full overflow-hidden text-start bg-zinc-950 light:bg-zinc-50 relative">
+      {!activeShift && (
+         <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center">
+            <div className="text-center space-y-4">
+               <Lock size={64} className="mx-auto text-red-500"/>
+               <h2 className="text-2xl font-black uppercase text-white">{lang === 'ar' ? 'الوردية مغلقة' : 'Shift Closed'}</h2>
+               <p className="text-zinc-400">{lang === 'ar' ? 'يرجى فتح وردية جديدة من لوحة التحكم لبدء البيع' : 'Please open a new shift from the dashboard to start selling'}</p>
+            </div>
+         </div>
+      )}
+
       {stockError && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[200] bg-orange-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-top-4 font-black text-sm border border-orange-500/50">
           <AlertCircle size={20} />
@@ -455,25 +414,15 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
       )}
 
       <div className="flex-1 flex flex-col p-8 gap-6 overflow-hidden">
-        <div className="relative shrink-0 flex gap-2">
-          <div className="relative flex-1">
-             <Search size={20} className={`absolute ${lang === 'ar' ? 'right-4' : 'left-4'} top-1/2 -translate-y-1/2 text-zinc-500`} />
-             <input
-               ref={searchInputRef}
-               type="text"
-               placeholder={scanMode ? (lang === 'ar' ? 'جاهز للمسح...' : 'Ready to scan...') : t.scan_barcode}
-               className={`w-full bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-2xl py-4 ${lang === 'ar' ? 'pr-12 pl-4' : 'pl-12 pr-4'} focus:outline-none focus:border-red-500 transition-all font-bold text-zinc-100 light:text-zinc-900 shadow-lg light:shadow-sm ${scanMode ? 'border-red-500 ring-2 ring-red-500/20' : ''}`}
-               value={searchTerm}
-               onChange={(e) => setSearchTerm(e.target.value)}
-               autoFocus={scanMode}
-             />
-          </div>
-          <button 
-             onClick={() => setScanMode(!scanMode)}
-             className={`px-4 rounded-2xl border transition-all flex items-center gap-2 font-black text-xs uppercase ${scanMode ? 'bg-red-600 border-red-500 text-white shadow-lg' : 'bg-zinc-900 light:bg-white border-zinc-800 light:border-zinc-200 text-zinc-500'}`}
-          >
-             <ScanBarcode size={20}/> {scanMode ? 'ON' : 'OFF'}
-          </button>
+        <div className="relative shrink-0">
+          <Search size={20} className={`absolute ${lang === 'ar' ? 'right-4' : 'left-4'} top-1/2 -translate-y-1/2 text-zinc-500`} />
+          <input
+            type="text"
+            placeholder={t.scan_barcode}
+            className={`w-full bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-2xl py-4 ${lang === 'ar' ? 'pr-12 pl-4' : 'pl-12 pr-4'} focus:outline-none focus:border-red-500 transition-all font-bold text-zinc-100 light:text-zinc-900 shadow-lg light:shadow-sm`}
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
         </div>
 
         <div className="flex-1 flex flex-col gap-6 overflow-hidden">
@@ -489,7 +438,7 @@ const SalesScreen: React.FC<SalesScreenProps> = ({ data, updateData, addLog, lan
                 {displayedProducts.map(p => (
                   <button
                     key={p.id}
-                    onClick={() => handleProductSelect(p)}
+                    onClick={() => addToCart(p)}
                     className="group bg-zinc-900/50 light:bg-white hover:bg-zinc-800 light:hover:bg-zinc-50 border border-zinc-800 light:border-zinc-200 hover:border-red-500/50 rounded-2xl p-3 transition-all flex flex-col gap-3 text-start relative overflow-hidden shadow-sm"
                   >
                     <div className="aspect-square w-full rounded-xl bg-black light:bg-zinc-100 border border-zinc-800 light:border-zinc-200 overflow-hidden shrink-0">
