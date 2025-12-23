@@ -1,25 +1,22 @@
 
 import React, { useState, useMemo } from 'react';
-import { AppData, Employee, Sale, LogEntry } from '../types';
+import { AppData, Sale, LogEntry } from '../types';
 import { translations, Language } from '../translations';
 import { 
   Truck, 
   Search, 
-  Trash2, 
   ArrowUpRight, 
   Clock, 
-  DollarSign,
-  Receipt,
-  AlertTriangle,
-  UserCircle,
-  Phone,
-  Hash,
-  ChevronRight,
-  CheckCircle2,
-  XCircle,
-  Package,
-  RefreshCw,
-  RotateCcw
+  Receipt, 
+  AlertTriangle, 
+  Phone, 
+  Hash, 
+  ChevronRight, 
+  CheckCircle2, 
+  XCircle, 
+  Package, 
+  RefreshCw, 
+  RotateCcw 
 } from 'lucide-react';
 import { TwinXOps } from '../services/operations';
 
@@ -68,29 +65,41 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
     }, { totalCash: 0, totalFees: 0, count: 0 });
   }, [driverOrders]);
 
-  // TWINX COMMAND: Commit status change to Global Ledger
-  const handleUpdateStatus = (saleId: string, status: 'delivered' | 'cancelled' | 'pending') => {
+  /**
+   * TWINX COMMAND: Update status with Event Bubbling protection
+   * @param e React Mouse Event to stop propagation
+   * @param saleId ID of the invoice
+   * @param status New target status
+   */
+  const handleUpdateStatus = (e: React.MouseEvent, saleId: string, status: 'delivered' | 'cancelled' | 'pending') => {
+    e.stopPropagation(); // CRITICAL: Stop parent card from opening SaleDetailsModal
     setIsProcessing(saleId);
+    
     try {
       // Snapshot -> Mutate -> Commit
       const updatedData = TwinXOps.updateDeliveryStatus(data, saleId, status);
       updateData(updatedData);
       
-      // Clear visual lock after state cycles
-      setTimeout(() => setIsProcessing(null), 300);
+      // Visual feedback delay
+      setTimeout(() => setIsProcessing(null), 150);
     } catch (err: any) {
       alert(err.message);
       setIsProcessing(null);
     }
   };
 
-  // TWINX COMMAND: Clone transaction as fresh entry
-  const handleReOrder = (saleId: string) => {
+  /**
+   * TWINX COMMAND: Clone transaction as fresh entry
+   * @param e React Mouse Event to stop propagation
+   * @param saleId ID of the invoice
+   */
+  const handleReOrder = (e: React.MouseEvent, saleId: string) => {
+    e.stopPropagation(); // CRITICAL
     if (confirm(lang === 'ar' ? 'هل تريد تكرار هذا الأوردر كطلب جديد؟' : 'Duplicate this as a new order?')) {
       try {
         const updatedData = TwinXOps.duplicateSale(data, saleId);
         updateData(updatedData);
-        alert(lang === 'ar' ? 'تم إنشاء طلب جديد بنجاح' : 'New order created successfully');
+        addLog({ action: 'DELIVERY_REORDER', category: 'delivery', details: `Cloned order ${saleId.split('-')[0]} as new entry` });
       } catch (err: any) {
         alert(err.message);
       }
@@ -195,7 +204,7 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
              <div className="flex-1 flex flex-col animate-in fade-in duration-300 overflow-hidden">
                {/* Driver Stats View */}
                <div className="p-8 border-b border-zinc-800 light:border-zinc-200 bg-black/20 light:bg-white flex justify-between items-center shrink-0">
-                  <div className="flex items-center gap-6">
+                  <div className="flex items-center gap-6 text-start">
                     <div className="w-20 h-20 rounded-3xl bg-red-600 text-white flex items-center justify-center text-4xl font-black shadow-2xl shadow-red-900/20">{selectedDriver.name.charAt(0)}</div>
                     <div>
                       <h4 className="text-3xl font-black tracking-tighter text-zinc-100 light:text-zinc-900 uppercase leading-none mb-2">{selectedDriver.name}</h4>
@@ -209,15 +218,15 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
 
                {/* Snapshot Metrics */}
                <div className="p-8 grid grid-cols-1 md:grid-cols-3 gap-6 shrink-0 bg-black/10 light:bg-zinc-100/50 border-b border-zinc-800/50 light:border-zinc-200">
-                  <div className="p-6 bg-zinc-950 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-[32px] shadow-sm">
+                  <div className="p-6 bg-zinc-950 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-[32px] shadow-sm text-start">
                     <p className="text-[10px] font-black uppercase text-zinc-500 mb-1">{t.orders_assigned}</p>
                     <p className="text-3xl font-black text-zinc-100 light:text-zinc-900 tracking-tighter">{driverStats.count}</p>
                   </div>
-                  <div className="p-6 bg-zinc-950 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-[32px] shadow-sm">
+                  <div className="p-6 bg-zinc-950 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-[32px] shadow-sm text-start">
                     <p className="text-[10px] font-black uppercase text-zinc-500 mb-1">{t.collected_cash}</p>
                     <p className="text-3xl font-black text-red-600 tracking-tighter">{data.currency} {driverStats.totalCash.toLocaleString()}</p>
                   </div>
-                  <div className="p-6 bg-zinc-950 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-[32px] shadow-sm">
+                  <div className="p-6 bg-zinc-950 light:bg-white border border-zinc-800 light:border-zinc-200 rounded-[32px] shadow-sm text-start">
                     <p className="text-[10px] font-black uppercase text-zinc-500 mb-1">{lang === 'ar' ? 'إجمالي الأجر' : 'Earnings'}</p>
                     <p className="text-3xl font-black text-green-500 tracking-tighter">{data.currency} {driverStats.totalFees.toLocaleString()}</p>
                   </div>
@@ -233,7 +242,11 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
                  
                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                    {driverOrders.map(sale => (
-                     <div key={sale.id} className={`bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 p-6 rounded-[32px] flex flex-col gap-6 hover:scale-[1.01] transition-all shadow-lg group relative overflow-hidden ${getCardBorderStyle(sale.status)} ${sale.status === 'cancelled' ? 'opacity-60 grayscale' : ''}`}>
+                     <div 
+                        key={`${sale.id}-${sale.status}`} // Force re-render on status change to refresh badges/buttons
+                        onClick={() => onSelectSale(sale)}
+                        className={`bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 p-6 rounded-[32px] flex flex-col gap-6 hover:scale-[1.01] transition-all shadow-lg group relative overflow-hidden cursor-pointer ${getCardBorderStyle(sale.status)} ${sale.status === 'cancelled' ? 'opacity-60 grayscale' : ''}`}
+                      >
                         
                         {isProcessing === sale.id && (
                           <div className="absolute inset-0 z-20 bg-black/60 backdrop-blur-sm flex items-center justify-center animate-in fade-in">
@@ -244,7 +257,7 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
                         <div className="flex justify-between items-start">
                            <div className="flex items-center gap-3">
                               <div className={`w-10 h-10 rounded-2xl bg-zinc-800 light:bg-zinc-100 flex items-center justify-center transition-colors ${sale.status === 'delivered' ? 'text-green-500' : sale.status === 'cancelled' ? 'text-red-500' : 'text-orange-500 group-hover:text-red-500'}`}><Receipt size={20}/></div>
-                              <div>
+                              <div className="text-start">
                                  <div className="flex items-center gap-2 mb-1">
                                     <p className="font-black text-zinc-100 light:text-zinc-900 leading-none uppercase tracking-tighter">#{sale.id.split('-')[0]}</p>
                                     {getStatusBadge(sale.status)}
@@ -252,10 +265,10 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
                                  <p className="text-[10px] text-zinc-500 font-mono font-black">{new Date(sale.timestamp).toLocaleString()}</p>
                               </div>
                            </div>
-                           <button onClick={() => onSelectSale(sale)} className="p-2 text-zinc-600 hover:text-zinc-100 transition-colors"><ArrowUpRight size={18}/></button>
+                           <ArrowUpRight size={18} className="text-zinc-600 group-hover:text-zinc-100 transition-colors" />
                         </div>
 
-                        <div className="p-4 bg-zinc-950 light:bg-zinc-50 rounded-2xl border border-zinc-800 light:border-zinc-200 space-y-1">
+                        <div className="p-4 bg-zinc-950 light:bg-zinc-50 rounded-2xl border border-zinc-800 light:border-zinc-200 space-y-1 text-start">
                            <p className="text-[9px] font-black uppercase text-zinc-500">{t.customer_details}</p>
                            <p className="font-bold text-sm light:text-zinc-900 truncate uppercase tracking-tight">{sale.deliveryDetails?.customerName || t.cash_customer}</p>
                            <p className="text-xs text-zinc-600 font-mono">{sale.deliveryDetails?.customerPhone}</p>
@@ -267,32 +280,34 @@ const DeliveryScreen: React.FC<DeliveryScreenProps> = ({ data, updateData, addLo
                               <p className="text-xl font-black text-red-600 tracking-tighter">{data.currency} {sale.total.toLocaleString()}</p>
                            </div>
                            <div className="flex gap-2">
-                              {/* Order Lifecycle Controls */}
+                              {/* Order Lifecycle Controls with propagation protection */}
                               {(!sale.status || sale.status === 'pending') ? (
                                 <>
                                   <button 
-                                    onClick={() => handleUpdateStatus(sale.id, 'delivered')}
+                                    onClick={(e) => handleUpdateStatus(e, sale.id, 'delivered')}
                                     className="w-12 h-12 rounded-2xl bg-green-500/10 text-green-500 border border-green-500/20 flex items-center justify-center hover:bg-green-600 hover:text-white transition-all shadow-lg"
+                                    title={lang === 'ar' ? 'توصيل' : 'Deliver'}
                                   >
                                     <CheckCircle2 size={22}/>
                                   </button>
                                   <button 
-                                    onClick={() => handleUpdateStatus(sale.id, 'cancelled')}
+                                    onClick={(e) => handleUpdateStatus(e, sale.id, 'cancelled')}
                                     className="w-12 h-12 rounded-2xl bg-red-500/10 text-red-500 border border-red-500/20 flex items-center justify-center hover:bg-red-600 hover:text-white transition-all shadow-lg"
+                                    title={lang === 'ar' ? 'إلغاء' : 'Cancel'}
                                   >
                                     <XCircle size={22}/>
                                   </button>
                                 </>
                               ) : sale.status === 'cancelled' ? (
                                 <button 
-                                  onClick={() => handleUpdateStatus(sale.id, 'pending')}
+                                  onClick={(e) => handleUpdateStatus(e, sale.id, 'pending')}
                                   className="px-4 py-2 rounded-xl bg-orange-600/10 text-orange-500 border border-orange-500/20 flex items-center gap-2 text-[10px] font-black uppercase hover:bg-orange-600 hover:text-white transition-all"
                                 >
                                   <RotateCcw size={14}/> {lang === 'ar' ? 'استعادة' : 'Restore'}
                                 </button>
                               ) : (
                                 <button 
-                                  onClick={() => handleReOrder(sale.id)}
+                                  onClick={(e) => handleReOrder(e, sale.id)}
                                   className="px-4 py-2 rounded-xl bg-blue-600/10 text-blue-500 border border-blue-500/20 flex items-center gap-2 text-[10px] font-black uppercase hover:bg-blue-600 hover:text-white transition-all"
                                 >
                                   <RefreshCw size={14}/> {lang === 'ar' ? 'تكرار الطلب' : 'Re-Order'}
