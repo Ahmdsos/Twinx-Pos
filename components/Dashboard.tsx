@@ -80,16 +80,18 @@ const Dashboard: React.FC<DashboardProps> = ({ data, updateData, lang, setView, 
       .filter(t => t.type === 'purchase')
       .reduce((acc, t) => acc + (t.total - t.paidAmount), 0);
 
-    // NET PROFIT CALCULATION (Corrected: Don't subtract Salary twice)
-    // Formula: (Retail Sales Revenue + Delivery Income) - (COGS) - (Expenses) - (Salaries) - (Returns)
-    const productRevenue = sales.reduce((acc, s) => acc + (s.status !== 'cancelled' ? (s.subtotal - s.totalDiscount) : 0), 0);
-    const deliveryIncome = sales.reduce((acc, s) => acc + (s.status !== 'cancelled' ? (s.deliveryFee || 0) : 0), 0);
-    const cogs = sales.reduce((acc, s) => acc + (s.status !== 'cancelled' ? (s.totalCost || 0) : 0), 0);
+    // NET PROFIT CALCULATION REFINED
+    const activeSales = sales.filter(s => s.status !== 'cancelled');
+    
+    const productRevenue = activeSales.reduce((acc, s) => acc + (s.subtotal - s.totalDiscount), 0);
+    const deliveryIncome = activeSales.reduce((acc, s) => acc + (s.deliveryFee || 0), 0);
+    const cogs = activeSales.reduce((acc, s) => acc + (s.totalCost || 0), 0);
     
     const totalExpenses = expenses.reduce((acc, e) => acc + e.amount, 0);
     const totalSalaries = salaries.reduce((acc, s) => acc + s.amount, 0);
     const totalReturns = (data.returns || []).reduce((acc, r) => acc + r.totalRefund, 0);
 
+    // Net Profit = (Revenue from Goods + Delivery) - Cost of Goods - Operational Expenses - Salaries - Refunds
     const netProfit = (productRevenue + deliveryIncome) - cogs - totalExpenses - totalSalaries - totalReturns;
 
     const totalOperatingExpenses = totalExpenses + totalSalaries; // Used for Expense Card display
@@ -426,7 +428,6 @@ const Dashboard: React.FC<DashboardProps> = ({ data, updateData, lang, setView, 
                      </div>
                   )}
                   
-                  {/* Additional views for Receivables/Payables can be added here following same pattern */}
                   {drillDown === 'receivables' && (
                      <div className="space-y-4">
                         <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl text-blue-400 text-sm font-bold text-center">

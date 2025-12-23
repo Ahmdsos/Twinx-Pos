@@ -175,6 +175,7 @@ const App: React.FC = () => {
 
     const totalExpenses = data.expenses.reduce((acc, exp) => acc + exp.amount, 0);
     const totalRefunds = data.returns?.reduce((acc, ret) => acc + ret.totalRefund, 0) || 0;
+    const totalSalaries = (data.salaryTransactions || []).reduce((acc, sal) => acc + sal.amount, 0);
     
     // 2. Wholesale: Cash received (Sales) or Paid out (Purchases)
     const totalWholesaleReceived = (data.wholesaleTransactions || [])
@@ -184,7 +185,8 @@ const App: React.FC = () => {
       .filter(t => t.type === 'purchase')
       .reduce((acc, t) => acc + t.paidAmount, 0);
 
-    return data.initialCash + realizedRetailSales + totalWholesaleReceived - totalExpenses - totalRefunds - totalWholesalePaidOut;
+    // FIXED: Subtract totalSalaries to reflect actual cash on hand
+    return data.initialCash + realizedRetailSales + totalWholesaleReceived - totalExpenses - totalRefunds - totalWholesalePaidOut - totalSalaries;
   }, [data]);
 
   const renderView = () => {

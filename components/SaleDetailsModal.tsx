@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Sale, CartItem, Customer } from '../types';
 import { translations, Language } from '../translations';
-import { X, Printer, Trash2, Save, ShoppingBag, Clock, User, Phone, MapPin, Truck, Layout, Hash, DollarSign } from 'lucide-react';
+import { X, Printer, Trash2, Save, ShoppingBag, Clock, User, Phone, MapPin, Truck, Layout, Hash, DollarSign, AlertCircle } from 'lucide-react';
 import JsBarcode from 'jsbarcode';
 
 interface SaleDetailsModalProps {
@@ -52,6 +52,7 @@ const SaleDetailsModal: React.FC<SaleDetailsModalProps> = ({ sale, lang, currenc
       <div dir="${lang === 'ar' ? 'rtl' : 'ltr'}" style="width: 58mm; padding: 2mm; font-family: 'Courier New', Courier, monospace; color: black; background: white; font-size: 9pt;">
         <div style="text-align: center; font-weight: bold; font-size: 14pt; margin-bottom: 2mm;">TWINX POS</div>
         <div style="text-align: center; font-size: 8pt; margin-bottom: 4mm;">${lang === 'ar' ? 'نظام مبيعات محلي' : 'OFFLINE RETAIL SYSTEM'}</div>
+        ${editedSale.status === 'cancelled' ? `<div style="text-align: center; font-weight: bold; font-size: 12pt; border: 2px solid black; margin-bottom: 2mm;">CANCELLED / ملغاة</div>` : ''}
         <div style="border-top: 1px dashed black; padding-top: 2mm; margin-bottom: 2mm;">
           <div>${lang === 'ar' ? 'رقم الفاتورة' : 'INV'}: ${editedSale.id.split('-')[0].toUpperCase()}</div>
           <div>${lang === 'ar' ? 'التاريخ' : 'DATE'}: ${dateStr}</div>
@@ -87,7 +88,15 @@ const SaleDetailsModal: React.FC<SaleDetailsModalProps> = ({ sale, lang, currenc
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-xl p-4 animate-in fade-in duration-300">
-      <div className="bg-zinc-900 border border-zinc-800 w-full max-w-4xl rounded-[40px] overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+      <div className="bg-zinc-900 border border-zinc-800 w-full max-w-4xl rounded-[40px] overflow-hidden shadow-2xl flex flex-col max-h-[90vh] relative">
+        
+        {/* WATERMARK FOR CANCELLED */}
+        {editedSale.status === 'cancelled' && (
+           <div className="absolute inset-0 z-50 pointer-events-none flex items-center justify-center opacity-30 rotate-[-15deg]">
+              <h1 className="text-[150px] font-black text-red-500 border-8 border-red-500 px-10 rounded-[40px]">CANCELLED</h1>
+           </div>
+        )}
+
         <div className="p-8 border-b border-zinc-800 flex justify-between items-center bg-black/20 shrink-0">
           <div className="text-start">
             <h4 className="text-2xl font-black tracking-tighter uppercase">{t.view_invoice}</h4>
@@ -111,6 +120,9 @@ const SaleDetailsModal: React.FC<SaleDetailsModalProps> = ({ sale, lang, currenc
                     <div>
                       <p className="font-bold text-zinc-100">{item.name}</p>
                       <p className="text-xs text-zinc-500">{currency} {item.price} × {item.quantity}</p>
+                      {item.returnedQuantity && item.returnedQuantity > 0 ? (
+                        <p className="text-[10px] font-black text-orange-500 uppercase mt-1">Returned: {item.returnedQuantity}</p>
+                      ) : null}
                     </div>
                     <p className="font-black text-red-500">{currency} {(item.price * item.quantity).toLocaleString()}</p>
                   </div>
@@ -205,7 +217,9 @@ const SaleDetailsModal: React.FC<SaleDetailsModalProps> = ({ sale, lang, currenc
         <div className="p-8 bg-black/40 border-t border-zinc-800 flex gap-4 shrink-0">
           <button onClick={() => onDelete(editedSale.id)} className="flex items-center justify-center gap-2 px-8 py-4 bg-zinc-800/50 hover:bg-red-950 text-red-500 font-black uppercase tracking-widest text-xs rounded-2xl transition-all"><Trash2 size={18} /> {lang === 'ar' ? 'حذف' : 'Delete'}</button>
           <div className="flex-1"></div>
-          <button onClick={() => onUpdate(editedSale)} className="flex items-center justify-center gap-2 px-12 py-4 bg-zinc-100 hover:bg-white text-black font-black uppercase tracking-widest text-xs rounded-2xl shadow-xl transition-all"><Save size={18} /> {lang === 'ar' ? 'حفظ التعديلات' : 'Save Changes'}</button>
+          {editedSale.status !== 'cancelled' && (
+             <button onClick={() => onUpdate(editedSale)} className="flex items-center justify-center gap-2 px-12 py-4 bg-zinc-100 hover:bg-white text-black font-black uppercase tracking-widest text-xs rounded-2xl shadow-xl transition-all"><Save size={18} /> {lang === 'ar' ? 'حفظ التعديلات' : 'Save Changes'}</button>
+          )}
         </div>
       </div>
     </div>

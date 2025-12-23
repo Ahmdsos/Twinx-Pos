@@ -23,7 +23,8 @@ import {
   Info,
   MapPin,
   CreditCard,
-  Lock
+  Lock,
+  Truck
 } from 'lucide-react';
 import { TwinXOps } from '../services/operations';
 
@@ -54,6 +55,7 @@ const EmployeesScreen: React.FC<EmployeesScreenProps> = ({ data, updateData, add
     nationalId: '',
     address: '',
     emergencyContact: '',
+    vehicleId: '',
     permissions: {
       canDeleteInvoice: false,
       canApplyDiscount: false,
@@ -311,7 +313,9 @@ const EmployeesScreen: React.FC<EmployeesScreenProps> = ({ data, updateData, add
                         <div className="space-y-2">
                           <p className="text-xs text-zinc-500"><span className="font-bold text-zinc-400">National ID:</span> {selectedStaff.nationalId || '---'}</p>
                           <p className="text-xs text-zinc-500"><span className="font-bold text-zinc-400">Address:</span> {selectedStaff.address || '---'}</p>
-                          <p className="text-xs text-zinc-500"><span className="font-bold text-zinc-400">Emerg. Contact:</span> {selectedStaff.emergencyContact || '---'}</p>
+                          {selectedStaff.role === 'delivery' && (
+                             <p className="text-xs text-zinc-500"><span className="font-bold text-zinc-400">Vehicle:</span> {selectedStaff.vehicleId || '---'}</p>
+                          )}
                         </div>
                     </div>
                  </div>
@@ -348,7 +352,7 @@ const EmployeesScreen: React.FC<EmployeesScreenProps> = ({ data, updateData, add
         </div>
       )}
 
-      {/* MODAL: ADD EMPLOYEE */}
+      {/* MODAL: ADD EMPLOYEE (CONDITIONAL FIELDS) */}
       {showAddModal && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/90 p-4 animate-in fade-in overflow-y-auto">
            <div className="bg-zinc-900 light:bg-white border border-zinc-800 light:border-zinc-200 w-full max-w-2xl rounded-[40px] overflow-hidden shadow-2xl animate-in zoom-in-95 my-10">
@@ -385,23 +389,35 @@ const EmployeesScreen: React.FC<EmployeesScreenProps> = ({ data, updateData, add
                 </div>
 
                 <div className="space-y-4 pt-4 border-t border-zinc-800/50">
-                    <h5 className="text-[10px] font-black uppercase tracking-widest text-blue-500 flex items-center gap-2"><ShieldCheck size={12}/> Security & Details</h5>
+                    <h5 className="text-[10px] font-black uppercase tracking-widest text-blue-500 flex items-center gap-2"><ShieldCheck size={12}/> {lang === 'ar' ? 'تفاصيل الوظيفة' : 'Job Details'}</h5>
+                    
+                    {/* Common Fields */}
                     <div className="grid grid-cols-2 gap-6">
                        <input type="text" placeholder="National ID" className="bg-black border border-zinc-800 rounded-xl px-4 py-3 text-xs" value={employeeForm.nationalId} onChange={e => setEmployeeForm({...employeeForm, nationalId: e.target.value})} />
                        <input type="text" placeholder="Address" className="bg-black border border-zinc-800 rounded-xl px-4 py-3 text-xs" value={employeeForm.address} onChange={e => setEmployeeForm({...employeeForm, address: e.target.value})} />
                     </div>
-                    
-                    <div className="bg-black/20 p-4 rounded-xl border border-zinc-800/50">
-                       <p className="text-[9px] font-black uppercase text-zinc-500 mb-2">Permissions</p>
-                       <div className="grid grid-cols-2 gap-2">
-                          {Object.keys(employeeForm.permissions).map(key => (
-                            <label key={key} className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer hover:text-white">
-                               <input type="checkbox" checked={employeeForm.permissions[key as keyof typeof employeeForm.permissions]} onChange={() => togglePermission(key as any)} className="accent-red-600 rounded" />
-                               {key.replace(/([A-Z])/g, ' $1').trim()}
-                            </label>
-                          ))}
+
+                    {/* Conditional Fields based on Role */}
+                    {employeeForm.role === 'delivery' && (
+                       <div className="p-4 bg-orange-600/10 border border-orange-500/20 rounded-2xl animate-in slide-in-from-top-2">
+                          <label className="text-[10px] font-black uppercase text-orange-500 block mb-2 flex items-center gap-2"><Truck size={12}/> Vehicle Information</label>
+                          <input type="text" placeholder="Vehicle Model / Plate Number" className="w-full bg-black border border-zinc-800 rounded-xl px-4 py-3 text-xs" value={employeeForm.vehicleId} onChange={e => setEmployeeForm({...employeeForm, vehicleId: e.target.value})} />
                        </div>
-                    </div>
+                    )}
+
+                    {(employeeForm.role === 'admin' || employeeForm.role === 'manager') && (
+                        <div className="bg-black/20 p-4 rounded-xl border border-zinc-800/50">
+                           <p className="text-[9px] font-black uppercase text-zinc-500 mb-2">Permissions</p>
+                           <div className="grid grid-cols-2 gap-2">
+                              {Object.keys(employeeForm.permissions).map(key => (
+                                <label key={key} className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer hover:text-white">
+                                   <input type="checkbox" checked={employeeForm.permissions[key as keyof typeof employeeForm.permissions]} onChange={() => togglePermission(key as any)} className="accent-red-600 rounded" />
+                                   {key.replace(/([A-Z])/g, ' $1').trim()}
+                                </label>
+                              ))}
+                           </div>
+                        </div>
+                    )}
                 </div>
 
               </div>

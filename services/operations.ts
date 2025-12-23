@@ -44,10 +44,6 @@ export const TwinXOps = {
 
     const shift = newData.shifts[shiftIndex];
     
-    // Calculate expected cash for this specific shift period
-    // (This is a basic estimation, a real pro system would filter sales by shiftId)
-    // For simplicity in this version, we assume linear accumulation, but storing shiftId on Sales allows precise calculation later.
-    
     newData.shifts[shiftIndex] = {
       ...shift,
       endTime: Date.now(),
@@ -61,6 +57,7 @@ export const TwinXOps = {
 
   /**
    * Processes a retail sale atomically.
+   * FIX: Customer Total Purchases now EXCLUDES delivery fee.
    */
   processRetailSale: (currentData: AppData, saleData: Partial<Sale>): AppData => {
     const newData: AppData = JSON.parse(JSON.stringify(currentData));
@@ -81,7 +78,6 @@ export const TwinXOps = {
       if (pIndex === -1) throw new Error(`Product missing from ledger: ${item.name}`);
       const p = newData.products[pIndex];
       
-      // Stock Check (Allow over-selling if strictly needed, but here we block)
       if (p.stock < item.quantity) {
         throw new Error(`Insufficient stock for ${item.name}. Available: ${p.stock}`);
       }
@@ -90,8 +86,9 @@ export const TwinXOps = {
       newData.products[pIndex].stock -= item.quantity;
     }
 
-    const productRevenue = subtotal - discount;
-    const total = productRevenue + deliveryIncome;
+    // Financials
+    const productRevenue = subtotal - discount; // Net revenue from goods only
+    const total = productRevenue + deliveryIncome; // Total Invoice Value
     const paid = saleData.paidAmount ?? total;
     const remaining = Math.max(0, total - paid);
     const totalProfit = (productRevenue - totalCost) + deliveryIncome;
@@ -120,14 +117,14 @@ export const TwinXOps = {
       shiftId: activeShift.id
     };
 
-    // 2. Update Customer Stats
+    // 2. Update Customer Stats (FIXED: Exclude Delivery Fee)
     if (finalSale.customerId) {
       const cIndex = newData.customers.findIndex(c => c.id === finalSale.customerId);
       if (cIndex >= 0) {
         const c = newData.customers[cIndex];
         newData.customers[cIndex] = {
           ...c,
-          totalPurchases: c.totalPurchases + total,
+          totalPurchases: c.totalPurchases + productRevenue, // Only add product value, not delivery
           invoiceCount: c.invoiceCount + 1,
           totalPoints: (c.totalPoints || 0) + pointsEarned,
           lastOrderTimestamp: finalSale.timestamp,
@@ -148,6 +145,7 @@ export const TwinXOps = {
 
   /**
    * Update order/delivery status with full reversal logic.
+   * FIX: Correctly reverse customer stats including delivery fee separation.
    */
   updateDeliveryStatus: (currentData: AppData, saleId: string, status: 'delivered' | 'cancelled' | 'pending'): AppData => {
     const newData: AppData = JSON.parse(JSON.stringify(currentData));
@@ -160,11 +158,10 @@ export const TwinXOps = {
 
     // REVERSAL LOGIC: Transitioning TO Cancelled
     if (status === 'cancelled' && oldStatus !== 'cancelled') {
-      // 1. Restock items (AUTOMATIC RESTOCK)
+      // 1. Restock items
       originalSale.items.forEach(item => {
         const pIndex = newData.products.findIndex(p => p.id === item.id);
         if (pIndex >= 0) {
-          // If items were previously returned via the Return module, don't double restock.
           const quantityToRestore = item.quantity - (item.returnedQuantity || 0);
           if (quantityToRestore > 0) {
              newData.products[pIndex].stock += quantityToRestore;
@@ -172,27 +169,30 @@ export const TwinXOps = {
         }
       });
 
-      // 2. Reverse Financials from Customer Profile
+      // 2. Reverse Financials from Customer Profile (FIXED)
       if (originalSale.customerId) {
         const cIndex = newData.customers.findIndex(c => c.id === originalSale.customerId);
         if (cIndex >= 0) {
           const c = newData.customers[cIndex];
+          // Determine what was added to customer stats (Total - Delivery)
+          const valueAddedToStats = originalSale.total - (originalSale.deliveryFee || 0);
+          
           newData.customers[cIndex] = {
             ...c,
-            totalPurchases: Math.max(0, c.totalPurchases - originalSale.total),
+            totalPurchases: Math.max(0, c.totalPurchases - valueAddedToStats),
             invoiceCount: Math.max(0, c.invoiceCount - 1),
             totalPoints: Math.max(0, (c.totalPoints || 0) - (originalSale.pointsEarned || 0))
           };
         }
       }
       
-      // 3. Mark as Cancelled (Financials in App.tsx ignore 'cancelled' status)
+      // 3. Mark as Cancelled
       newData.sales[saleIndex].status = 'cancelled';
       
     } 
-    // RESTORATION LOGIC: Transitioning FROM Cancelled back to Active (Undo Cancel)
+    // RESTORATION LOGIC: Transitioning FROM Cancelled back to Active
     else if (status !== 'cancelled' && oldStatus === 'cancelled') {
-      // 1. Deduct Stock again (Validation required)
+      // 1. Deduct Stock again
       originalSale.items.forEach(item => {
         const pIndex = newData.products.findIndex(p => p.id === item.id);
         if (pIndex >= 0) {
@@ -204,14 +204,16 @@ export const TwinXOps = {
         }
       });
 
-      // 2. Restore Financials to Customer Profile
+      // 2. Restore Financials to Customer Profile (FIXED)
       if (originalSale.customerId) {
         const cIndex = newData.customers.findIndex(c => c.id === originalSale.customerId);
         if (cIndex >= 0) {
           const c = newData.customers[cIndex];
+          const valueToRestore = originalSale.total - (originalSale.deliveryFee || 0);
+
           newData.customers[cIndex] = {
             ...c,
-            totalPurchases: c.totalPurchases + originalSale.total,
+            totalPurchases: c.totalPurchases + valueToRestore,
             invoiceCount: c.invoiceCount + 1,
             totalPoints: (c.totalPoints || 0) + (originalSale.pointsEarned || 0)
           };
@@ -219,7 +221,7 @@ export const TwinXOps = {
       }
       newData.sales[saleIndex].status = status;
     } else {
-      // Just a normal status update (Pending -> Delivered)
+      // Normal status update
       newData.sales[saleIndex].status = status;
     }
 
@@ -233,7 +235,7 @@ export const TwinXOps = {
 
   /**
    * Processes a Return.
-   * FIX: Added strict check to prevent infinite returns.
+   * FIX: Ensure refunds are properly deducted.
    */
   processReturn: (currentData: AppData, returnRecord: SaleReturn): AppData => {
     const newData: AppData = JSON.parse(JSON.stringify(currentData));
@@ -248,8 +250,7 @@ export const TwinXOps = {
       : 1;
     
     let totalCalculatedRefund = 0;
-    let totalReturnedCost = 0;
-
+    
     for (const returnItem of returnRecord.items) {
       const itemIndex = originalSale.items.findIndex(i => i.id === returnItem.productId);
       if (itemIndex === -1) throw new Error(`Product ${returnItem.productId} not found in invoice.`);
@@ -257,35 +258,36 @@ export const TwinXOps = {
       const item = originalSale.items[itemIndex];
       const currentReturned = item.returnedQuantity || 0;
       
-      // Strict Check
       if (currentReturned + returnItem.quantity > item.quantity) {
-        throw new Error(`Cannot return ${returnItem.quantity}. Only ${item.quantity - currentReturned} remaining for ${item.name}.`);
+        throw new Error(`Cannot return ${returnItem.quantity}. Only ${item.quantity - currentReturned} remaining.`);
       }
 
-      // 1. Update Sale Metadata
+      // Update Sale Item
       originalSale.items[itemIndex].returnedQuantity = currentReturned + returnItem.quantity;
       
-      // 2. Calculate Refund (Applying weighted discount)
+      // Calculate Refund
       totalCalculatedRefund += (item.price * returnItem.quantity) * discountRatio;
       
-      // 3. Return to Stock
+      // Return to Stock
       const pIndex = newData.products.findIndex(p => p.id === returnItem.productId);
       if (pIndex >= 0) {
         newData.products[pIndex].stock += returnItem.quantity;
-        totalReturnedCost += (newData.products[pIndex].costPrice * returnItem.quantity);
       }
     }
 
-    // 4. Financial Adjustments (Atomic)
+    // Financial Adjustments
     originalSale.remainingAmount = Math.max(0, originalSale.remainingAmount - totalCalculatedRefund);
-    // Note: We don't reduce totalCost/Profit on the sale record itself to preserve history, 
-    // instead the Return record acts as a contra-revenue entry in Reports.
 
-    // 5. Loyalty Reversal
+    // FIX: Loyalty Reversal & Customer Stats Adjustment
     if (originalSale.customerId) {
       const cIndex = newData.customers.findIndex(c => c.id === originalSale.customerId);
       if (cIndex >= 0) {
-        newData.customers[cIndex].totalPoints = Math.max(0, (newData.customers[cIndex].totalPoints || 0) - Math.floor(totalCalculatedRefund));
+        const c = newData.customers[cIndex];
+        newData.customers[cIndex] = {
+           ...c,
+           totalPurchases: Math.max(0, c.totalPurchases - totalCalculatedRefund), // Deduct refund from history
+           totalPoints: Math.max(0, (c.totalPoints || 0) - Math.floor(totalCalculatedRefund))
+        };
       }
     }
 
@@ -374,10 +376,6 @@ export const TwinXOps = {
     const employee = newData.employees.find(e => e.id === transaction.employeeId);
     if (!employee) throw new Error("Employee not found.");
 
-    // BUG FIX: Do NOT add to 'expenses' array if it is already in 'salaryTransactions'.
-    // Expenses array is for non-salary costs (Rent, etc).
-    // Reports will sum (Expenses + SalaryTransactions).
-    
     newData.salaryTransactions = [...(newData.salaryTransactions || []), transaction];
     
     newData.logs = [
